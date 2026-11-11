@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Main window. The app's own save commands are always allowed; no filesystem or shell plugins are used.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
