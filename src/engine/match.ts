@@ -1,7 +1,7 @@
 import { Narrator, type CardFacts, type Facts } from "./commentary";
 import { Rng } from "./rng";
 import { ROLES, emptyTotals } from "./types";
-import type { Attr, EventType, MatchEvent, MatchLog, Player, PlayerLine, Role, TacticId, Team, TeamStats } from "./types";
+import type { Attr, EventType, MatchEvent, MatchLog, Player, PlayerLine, Role, ShapeId, TacticId, Team, TeamStats } from "./types";
 
 /**
  * "Dominion": a rugby-inspired territory game, 5v5 on a 100m arena.
@@ -59,6 +59,49 @@ export const TALKS: Record<TalkId, { label: string; description: string }> = {
   gamble: { label: "Gamble", description: "Could inspire a comeback, could backfire." },
 };
 
+export interface ShapeProfile {
+  label: string;
+  description: string;
+  /** Metres the opposition gain per carry: through the middle, and out wide (Winger carries). */
+  mid: number;
+  wide: number;
+  /** Added to the opposition's line-break chance, middle and wide. */
+  brkMid: number;
+  brkWide: number;
+  /** Multiplier on the Sweeper's chance to cover a break. */
+  cover: number;
+  /** Multiplier on the penalty for playing a man down (a flat or narrow line hides the gap better). */
+  manDown: number;
+  /** Extra metres on a break that is not covered: nobody behind the line to stop it. */
+  open: number;
+}
+
+/**
+ * Defensive shape. Each option trades something: the Sweeper deep covers breaks but leaves the
+ * middle softer, a flat line stops metres but has nobody behind, a narrow line squeezes the middle
+ * but gives up the wing.
+ */
+export const SHAPES: Record<ShapeId, ShapeProfile> = {
+  sweeper: { label: "Sweeper back", description: "Your Sweeper stays deep and covers the edges and line breaks. The best answer to a quick Winger. A little open to power runners through the middle.", mid: 0.3, wide: -1.2, brkMid: 0, brkWide: -0.01, cover: 1, manDown: 1, open: 0 },
+  flat: { label: "Flat line", description: "Your Sweeper steps into the line. Power runners gain far fewer metres, and it is the best cover when you are a man down against forwards. But nobody is left behind: a quick Winger or a line break usually means a try.", mid: -1.8, wide: 2, brkMid: -0.025, brkWide: 0.02, cover: 0.2, manDown: 0.75, open: 11 },
+  narrow: { label: "Narrow", description: "Defenders squeeze towards the middle, which hides a gap well. The best all-round choice against a balanced attack, but the wing is left open for a quick Winger.", mid: -1.1, wide: 3.6, brkMid: -0.015, brkWide: 0.07, cover: 0.9, manDown: 0.85, open: 0 },
+};
+
+/** The shape AI clubs use, following their style. */
+export const SHAPE_BY_STYLE: Record<TacticId, ShapeId> = { balanced: "sweeper", attacking: "flat", defensive: "sweeper", territory: "narrow" };
+
+/**
+ * Scouting advice: the best defensive shape against a given attack. `attackers` is the opposition
+ * lineup in slot order (Anchor, Bruiser, Pivot, Winger, Sweeper).
+ */
+export function adviseShape(attackers: Player[]): { best: ShapeId; why: string } {
+  const [anchor, bruiser, , winger] = attackers;
+  const forwards = (anchor.power + bruiser.power) / 2;
+  if (winger.pace - forwards >= 4) return { best: "sweeper", why: `Their Winger ${winger.name} is quick (pace ${winger.pace}). Keep the Sweeper back to cover breaks; a narrow shape would leave the wing open.` };
+  if (forwards - winger.pace >= 4) return { best: "flat", why: `Their forwards are powerful (power ${Math.round(forwards)}). A flat line stops them gaining metres through the middle.` };
+  return { best: "narrow", why: "Their attack is balanced and they have no standout Winger. Squeezing the middle is safe." };
+}
+
 const ROLE_CARRY: Record<Role, number> = { Anchor: 1, Bruiser: 1.3, Pivot: 0.8, Winger: 1, Sweeper: 0.7 };
 
 export interface MatchInput {
@@ -69,6 +112,12 @@ export interface MatchInput {
   away: Team;
   homeTactic: TacticId;
   awayTactic: TacticId;
+  /** Defensive shape; defaults to the one that suits the tactic. */
+  homeShape?: ShapeId;
+  awayShape?: ShapeId;
+  /** True when the game chooses the shape (AI clubs, and quick sim), including after a card. */
+  homeAuto?: boolean;
+  awayAuto?: boolean;
   seed: number;
 }
 
@@ -91,6 +140,9 @@ const MISSES: MissKind[] = ["post", "post", "wide", "wide", "short"];
 interface Side {
   team: Team;
   tactic: TacticId;
+  shape: ShapeId;
+  /** The game picks this side's shape after a card instead of asking the manager. */
+  auto: boolean;
   score: number;
   stats: TeamStats;
   /** Five players in ROLES slot order (role = the slot they are playing). */
@@ -153,7 +205,7 @@ const isBanned = (p: Player) => (p.ban ?? 0) > 0;
  * player from the squad (same natural role first, then the highest overall rating), so a
  * ban never has to be handled by the AI or the UI to keep a match valid.
  */
-function makeSide(team: Team, tactic: TacticId): Side {
+function makeSide(team: Team, tactic: TacticId, shape: ShapeId, auto: boolean): Side {
   const starters = ROLES.map((slot, i) => {
     const p = team.players.find((x) => x.id === team.lineup[i]);
     if (!p) throw new Error(`Lineup slot ${slot} of ${team.name} is empty`);
@@ -169,7 +221,7 @@ function makeSide(team: Team, tactic: TacticId): Side {
     }
     return slotPlayer(p, slot);
   });
-  const side: Side = { team, tactic, score: 0, stats: emptyStats(), field, bench: spare, entered: new Map(), subs: 0, mod: { gain: 0, error: 0 }, bin: new Map(), sentOff: new Set(), yellowCount: new Map(), lines: new Map() };
+  const side: Side = { team, tactic, shape, auto, score: 0, stats: emptyStats(), field, bench: spare, entered: new Map(), subs: 0, mod: { gain: 0, error: 0 }, bin: new Map(), sentOff: new Set(), yellowCount: new Map(), lines: new Map() };
   return side;
 }
 
@@ -200,7 +252,10 @@ export class MatchSim {
     // Wording has its own random stream so changing the commentary never changes what happens.
     this.narrator = new Narrator(new Rng((input.seed ^ 0x9e3779b9) >>> 0));
     this.him = input.home.gender === "women" ? "her" : "him";
-    this.sides = [makeSide(input.home, input.homeTactic), makeSide(input.away, input.awayTactic)];
+    this.sides = [
+      makeSide(input.home, input.homeTactic, input.homeShape ?? SHAPE_BY_STYLE[input.homeTactic], !!input.homeAuto),
+      makeSide(input.away, input.awayTactic, input.awayShape ?? SHAPE_BY_STYLE[input.awayTactic], !!input.awayAuto),
+    ];
     this.sides.forEach((s, i) => s.field.forEach((p) => this.line(s, i as 0 | 1, p)));
     this.emit("kickoff", `${input.home.name} get us under way against ${input.away.name}. The ball is in play at the Dominion Arena.`, true, 0);
   }
@@ -230,6 +285,16 @@ export class MatchSim {
 
   setTactic(side: 0 | 1, tactic: TacticId) {
     this.sides[side].tactic = tactic;
+  }
+
+  setShape(side: 0 | 1, shape: ShapeId) {
+    this.sides[side].shape = shape;
+  }
+
+  /** When the game is in charge (AI, quick sim), pick the shape that best suits the opposition after a card. */
+  private autoCover(side: Side, idx: 0 | 1) {
+    if (!side.auto) return;
+    side.shape = adviseShape(this.sides[idx === 0 ? 1 : 0].field).best;
   }
 
   talk(side: 0 | 1, id: TalkId) {
@@ -339,7 +404,7 @@ export class MatchSim {
       side: info?.side,
       cast:
         info?.hl && this.cA && this.cD
-          ? { a: this.cA.field.map((p) => p.name), d: this.cD.field.map((p) => p.name), ai: info.ai ?? -1, di: info.di ?? -1, ...(offA.length ? { offA } : {}), ...(offD.length ? { offD } : {}) }
+          ? { a: this.cA.field.map((p) => p.name), d: this.cD.field.map((p) => p.name), ai: info.ai ?? -1, di: info.di ?? -1, ta: this.cA.tactic, td: this.cD.tactic, sa: this.cA.shape, sd: this.cD.shape, ...(offA.length ? { offA } : {}), ...(offD.length ? { offD } : {}) }
           : undefined,
       step: this.stepNo,
       minute: this.minute,
@@ -438,6 +503,7 @@ export class MatchSim {
     const c = this.cardFacts(D, culprit, high);
     c.backAt = Math.min(40, this.minute + BIN_PHASES / 2);
     this.emit("yellow", this.narrator.yellow(c), true, idx, culprit.name, undefined, { pid: culprit.id });
+    this.autoCover(D, idx);
   }
 
   private sendOff(D: Side, idx: 0 | 1, culprit: Player, l: PlayerLine, high: boolean, second: boolean) {
@@ -447,6 +513,7 @@ export class MatchSim {
     l.reds++;
     const c = this.cardFacts(D, culprit, high);
     this.emit("red", second ? this.narrator.secondYellow(c) : this.narrator.red(c), true, idx, culprit.name, undefined, { pid: culprit.id });
+    this.autoCover(D, idx);
   }
 
   private facts(A: Side, D: Side, extra: Partial<Facts> = {}): Facts {
@@ -591,18 +658,23 @@ export class MatchSim {
     const atk = w * eA(carrier, "pace") + (1 - w) * eA(carrier, "power");
     // A side with a player in the bin or sent off has a gap in its line and one fewer runner.
     const defAvg = avg(dOn.map((p) => eD(p, "tackling"))) + dT.defence;
-    const defRating = 0.5 * defAvg + 0.5 * (eD(tackler, "tackling") + dT.defence) - 5 * downD;
-    let gain = 8.5 + (atk - defRating) / 12 + aT.gain + A.mod.gain + 1.5 * downD - 1.2 * downA + rng.signed() * 8;
+    const dS = SHAPES[D.shape];
+    const wide = carrier.role === "Winger";
+    const dm = downD * dS.manDown; // the shape decides how badly a man down hurts
+    const defRating = 0.5 * defAvg + 0.5 * (eD(tackler, "tackling") + dT.defence) - 5 * dm;
+    let gain = 8.5 + (atk - defRating) / 12 + aT.gain + A.mod.gain + 1.5 * dm - 1.2 * downA + (wide ? dS.wide : dS.mid) + rng.signed() * 8;
     let broke = false;
     let covered = false;
     const sweeper = dOn.find((p) => p.role === "Sweeper");
-    const breakP = clamp(0.08 + (eA(carrier, "pace") - eD(tackler, "pace")) / 500 + 0.02 * downD, 0.02, 0.18);
+    const breakP = clamp(0.08 + (eA(carrier, "pace") - eD(tackler, "pace")) / 500 + 0.02 * dm + (wide ? dS.brkWide : dS.brkMid), 0.02, 0.18);
     if (rng.chance(breakP)) {
       broke = true;
       gain += 12 + rng.next() * 24;
-      if (sweeper && rng.chance(eD(sweeper, "tackling") / 170)) {
+      if (sweeper && rng.chance((eD(sweeper, "tackling") / 170) * dS.cover)) {
         gain = Math.min(gain, 14 + rng.next() * 8);
         covered = true;
+      } else {
+        gain += dS.open; // nobody behind the line to stop it
       }
     }
     if (pos > 80 && !broke) gain *= 0.85;

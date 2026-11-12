@@ -1,6 +1,6 @@
-import type { MatchLog, PlayerLine } from "../engine/types";
+import type { MatchLog } from "../engine/types";
 import { h } from "../dom";
-import { describeLine, impact } from "../league/season";
+import { describeLine, ratedPlayers } from "../league/awards";
 
 /** Scorers list as plain text lines, with cards. */
 export function scorerLines(m: MatchLog): string[] {
@@ -47,9 +47,7 @@ export function statBars(m: MatchLog): HTMLElement {
 
 /** The best performers of a match, best first, as "Name (Club): what they did". Empty for old logs. */
 export function standoutLines(m: MatchLog, count = 4): string[] {
-  const club = (l: PlayerLine) => (l.team === 0 ? m.homeName : m.awayName);
-  return [...(m.players ?? [])]
-    .sort((a, b) => impact(b) - impact(a))
+  return ratedPlayers(m)
     .slice(0, count)
-    .map((l) => `${l.name} (${club(l)}): ${describeLine(l)}`);
+    .map((r) => `${r.line.name} (${r.club}): ${describeLine(r.line)}`);
 }

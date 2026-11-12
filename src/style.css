@@ -193,3 +193,13 @@ h3.sub { color: var(--acc); font-size: 12px; text-transform: uppercase; letter-s
 .resumebar[hidden] { display: none; }
 .resumebar button { width: 100%; margin: 0 0 4px; }
 .live-main { overflow-y: auto; }
+.choices.three { grid-template-columns: 1fr 1fr 1fr; }
+.choice .rec { color: var(--acc); font-style: normal; font-size: 11px; margin-left: 4px; }
+.advice { color: var(--away); font-size: 12px; margin: 4px 0 8px; }
+.coverbox { border: 1px solid var(--away); padding: 8px; margin-bottom: 10px; }
+.coverbox button { text-align: left; font-size: 11px; }
+.coverbox .rec { color: var(--acc); }
+.potm { border: 1px solid var(--acc); background: #16281e; padding: 8px 10px; margin-bottom: 6px; }
+.potm-name { color: var(--acc); font-size: 15px; font-weight: bold; }
+.mvp { padding: 2px 0; font-size: 12px; }
+.potm-line { color: var(--acc); margin-top: 6px; font-size: 12px; }

@@ -3,7 +3,14 @@ export interface Fixture {
   matchday: number;
   homeId: string;
   awayId: string;
-  result?: { homeScore: number; awayScore: number; homeTries: number; awayTries: number };
+  result?: {
+    homeScore: number;
+    awayScore: number;
+    homeTries: number;
+    awayTries: number;
+    /** Player of the match (missing on results saved before this existed). */
+    potm?: { id: string; name: string; club: string; rating: number };
+  };
 }
 
 /** Double round-robin using the circle method: 2 * (n - 1) matchdays. */

@@ -1,6 +1,6 @@
 import { h } from "./dom";
-import { ATTRS, ROLES, type Gender, type MatchLog, type Player, type TacticId, type Team } from "./engine/types";
-import { TACTICS, slotPlayer } from "./engine/match";
+import { ATTRS, ROLES, type Gender, type MatchLog, type Player, type ShapeId, type TacticId, type Team } from "./engine/types";
+import { SHAPES, TACTICS, adviseShape, slotPlayer } from "./engine/match";
 import {
   TRAINING,
   buildSim,
@@ -121,7 +121,7 @@ function watchMatch() {
   if (!s || isSeasonOver(s)) return;
   const f = managedFixture(s);
   if (!f) return;
-  const sim = buildSim(s, f);
+  const sim = buildSim(s, f, true);
   const managedSide = f.homeId === s.managedId ? 0 : 1;
   live = new LiveMatch({
     onHelp: showRules,
@@ -346,7 +346,7 @@ function overviewView(s: SeasonState): HTMLElement {
           h("div", { class: "side" }, h("b", {}, home ? me.name : opp.name), h("div", { class: "dim" }, home ? `${ordinal(pos)}` : `${ordinal(oppPos)}`)),
           h("div", { class: "vs" }, "v"),
           h("div", { class: "side" }, h("b", {}, home ? opp.name : me.name), h("div", { class: "dim" }, home ? `${ordinal(oppPos)}` : `${ordinal(pos)}`))),
-        h("div", { class: "dim" }, `${home ? "Home" : "Away"}  |  Your tactic: ${TACTICS[s.tactic].label}  |  Rating ${teamRating(me)} v ${teamRating(opp)}`),
+        h("div", { class: "dim" }, `${home ? "Home" : "Away"}  |  Your tactic: ${TACTICS[s.tactic].label}  |  Shape: ${SHAPES[s.shape].label}  |  Rating ${teamRating(me)} v ${teamRating(opp)}`),
         h("div", { class: "dim" }, "Opposition form: ", formChips(s, opp.id)),
         h("div", { class: "toolbar" }, watch, sim, sc),
         h("div", { class: "hint" }, "Set your lineup, tactic and training on the Squad tab first. Watching lets you change tactics, substitute and give a half-time talk as it happens."),
@@ -359,7 +359,7 @@ function overviewView(s: SeasonState): HTMLElement {
     const r = last.result!;
     const btn = h("button", {}, "Replay");
     btn.onclick = () => replayMatch(last.id);
-    left.append(card(`Last result (matchday ${last.matchday})`, h("div", { class: "result" }, `${teamById(s, last.homeId).name}  ${r.homeScore} - ${r.awayScore}  ${teamById(s, last.awayId).name}`), h("div", { class: "toolbar" }, btn)));
+    left.append(card(`Last result (matchday ${last.matchday})`, h("div", { class: "result" }, `${teamById(s, last.homeId).name}  ${r.homeScore} - ${r.awayScore}  ${teamById(s, last.awayId).name}`), ...(r.potm ? [h("div", { class: "potm-line" }, `★ Player of the match: ${r.potm.name} (${r.potm.club}), rating ${r.potm.rating.toFixed(1)}`)] : []), h("div", { class: "toolbar" }, btn)));
   }
 
   left.append(card("Club news", h("ul", { class: "news" }, ...s.news.slice(0, 8).map((n) => h("li", {}, h("span", { class: "dim" }, n.matchday ? `S${n.season} MD${n.matchday}  ` : `S${n.season}  `), n.text)))));
@@ -380,6 +380,17 @@ function squadView(s: SeasonState): HTMLElement {
     b.onclick = () => void update((x) => void (x.tactic = id as TacticId));
     tactics.append(b);
   }
+  // Defensive shape, with scouting advice against whoever you play next.
+  const next = managedFixture(s);
+  const opp = next ? teamById(s, next.homeId === s.managedId ? next.awayId : next.homeId) : null;
+  const advice = opp ? adviseShape(opp.lineup.map((id) => opp.players.find((p) => p.id === id)!)) : null;
+  const shapes = h("div", { class: "choices three" });
+  for (const [id, sh] of Object.entries(SHAPES)) {
+    const rec = advice?.best === id;
+    const b = h("button", { class: `choice ${s.shape === id ? "active" : ""}` }, h("b", {}, sh.label, rec ? h("em", { class: "rec" }, ` recommended vs ${opp!.short}`) : null), h("span", {}, sh.description));
+    b.onclick = () => void update((x) => void (x.shape = id as ShapeId));
+    shapes.append(b);
+  }
   const training = h("div", { class: "choices" });
   for (const [id, t] of Object.entries(TRAINING)) {
     const b = h("button", { class: `choice ${s.training === id ? "active" : ""}` }, h("b", {}, t.label), h("span", {}, t.description));
@@ -390,6 +401,12 @@ function squadView(s: SeasonState): HTMLElement {
     card(`${team.name} - starting five & bench`, h("div", { class: "hint" }, hint), playerTable(team, { selectable: true })),
     card("Player stats", h("div", { class: "hint" }, "Hover a column heading to see what it counts. Yellow card: 10 minutes in the sin bin. Red card: off for the match and a one-match ban."), statsTable(s, team, render)),
     card("What the ratings mean (0-100, hover a column for the same tip)", h("div", { class: "legend" }, ...ATTRS.flatMap((a) => [h("b", {}, ATTR_INFO[a][0]), h("span", {}, ATTR_INFO[a][1])]))),
+    card(
+      "Your defensive shape",
+      h("div", { class: "hint" }, "Where your defence puts its weight. Tactic is how ambitious you are; shape is how you defend. Both show on the pitch in highlights. If one of your players is carded in a match you watch, the game pauses and asks how you want to cover. On quick sim, the game picks the best fit."),
+      ...(advice ? [h("div", { class: "advice" }, `Next opponent ${opp!.name}: ${advice.why}`)] : []),
+      shapes,
+    ),
     h("div", { class: "grid" },
       card("Your tactic", tactics),
       card("Training focus", h("div", { class: "hint" }, "After each matchday three players get a chance to improve in this area."), training)),
@@ -419,7 +436,7 @@ function fixturesView(s: SeasonState): HTMLElement {
 }
 
 function pickerView(): HTMLElement {
-  const box = h("div", { class: "picker" }, h("h1", {}, "ARENA LEAGUE MANAGER"), h("p", { class: "dim" }, "Dominion: five-a-side rugby for territory, played across Nigeria."));
+  const box = h("div", { class: "picker" }, h("h1", {}, "ARENA LEAGUE MANAGER"), h("p", { class: "dim" }, `Dominion: five-a-side rugby for territory, played across Nigeria.  Version ${__APP_VERSION__}`));
   const help = h("button", {}, "How to play");
   help.onclick = showRules;
 
@@ -500,7 +517,7 @@ function render() {
   else body.append(fixturesView(s));
   app.append(body);
   if (error) app.append(h("div", { class: "err" }, error));
-  app.append(h("footer", {}, `Saved automatically  |  Data: ${dir}`));
+  app.append(h("footer", {}, `Arena League Manager v${__APP_VERSION__}  |  Saved automatically  |  Data: ${dir}`));
 }
 
 document.addEventListener("keydown", (e) => {

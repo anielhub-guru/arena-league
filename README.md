@@ -55,6 +55,18 @@ Dominion rules: 40 minutes (80 phases), a 100m arena, sets of up to six tackles.
 
 Keys: `Space`/`Enter` quick-sim (or pause/resume while watching), `1`-`4` switch tabs.
 
+## Defensive shape
+
+Tactic is how ambitious you are; **shape** is how your defence stands: *Sweeper back* (covers the edges and line breaks, the best answer to a quick Winger), *Flat line* (power runners gain fewer metres and it hides a man down best against forwards, but nobody is behind the line) and *Narrow* (strong in the middle against a balanced attack, but the wing is open). Each trades something, which the simulations in `tests/shape.test.ts` check. The Squad tab recommends a shape against your next opponent's attack. If one of your players is carded in a match you are watching, the game pauses and asks how you want to cover; on quick sim the game picks the best fit. Tactic and shape show on the pitch in highlights (a flat line has five across, a man down leaves the remaining four re-spaced).
+
+## Player of the match
+
+At full time the game names a **player of the match** from what players did (points, line breaks, turnovers, tackles, metres, with a bonus for the winning side and penalties for cards), with a rating where about 6.0 is average, plus the best player on each side. It is saved on the result and shown on the overview.
+
+## Versioning
+
+The current version is in `package.json` (also shown in the app footer). To release: bump `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`, run `cd src-tauri && cargo update -w --offline` to refresh `Cargo.lock`, add a `CHANGELOG.md` entry, and tag the commit `vX.Y.Z`. `npm test` fails if the files disagree.
+
 ## Saves
 
 After each matchday the app writes full match logs first, then the season, to the app local data directory (written atomically via temp file and rename):
@@ -105,7 +117,7 @@ Tested on macOS 26 (Darwin 25.4), **Intel x86_64** host, Node 22, Rust 1.96.
 
 | Item | Status |
 |---|---|
-| TypeScript tests (`npm test`) | Pass (28 tests). Engine and league: determinism, score consistency, balance, highlight counts, a complete scene for every highlight type, schedule, full season and rollover. Cards: rate, yellow lasts exactly 10 minutes and the player returns, nobody acts while off the pitch, scenes omit carded players, the man-up side scores more, carded players cannot be substituted, defensive tactics get more cards. Suspensions: a red gives a one-match ban, the starter is replaced and the ban clears. Stats: player lines sum to the match and season, career rolls over, version 3 saves upgrade. Commentary: no back-to-back repeats, the animation's facts appear in every phrasing, score context, wording does not change results. |
+| TypeScript tests (`npm test`) | Pass (37 tests: engine, balance, highlights and scenes, cards and discipline, defensive shapes, player of the match, league, version consistency) |
 | Movement physics | Stepped frame by frame in a browser for every highlight kind: no teleporting (player steps stay within top speed), ball moves continuously (max about 0.5 m per frame). Acceleration spikes only at scripted tackles. |
 | Kick outcomes | All five rendered and checked by eye: good, off the post and in, off the post, wide, short. |
 | Resume button | Driven with a real click in a 560px-high window: appears when the substitution controls are touched, stays after a substitution, resumes the match. |

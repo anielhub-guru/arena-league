@@ -1,9 +1,12 @@
 import { hashSeed, Rng } from "../engine/rng";
-import { MatchSim, RED_BAN } from "../engine/match";
-import { STAT_KEYS, emptyTotals, ROLES, type Attr, type Gender, type MatchLog, type PlayerLine, type PlayerTotals, type Role, type TacticId, type Team } from "../engine/types";
+import { MatchSim, RED_BAN, SHAPE_BY_STYLE } from "../engine/match";
+import { STAT_KEYS, emptyTotals, ROLES, type Attr, type Gender, type MatchLog, type PlayerTotals, type Role, type ShapeId, type TacticId, type Team } from "../engine/types";
+import { describeLine, impact, playerOfTheMatch } from "./awards";
 import { buildSchedule, type Fixture } from "./schedule";
 import { computeStandings, standingsAt } from "./standings";
 import { evolvePlayers, generateTeams, overall } from "./teams";
+
+export { describeLine, impact };
 
 export const SAVE_VERSION = 4;
 
@@ -39,6 +42,8 @@ export interface SeasonState {
   managedId: string;
   /** Tactic chosen by the human manager. */
   tactic: TacticId;
+  /** Defensive shape chosen by the human manager. */
+  shape: ShapeId;
   training: TrainingFocus;
   teams: Team[];
   fixtures: Fixture[];
@@ -56,8 +61,8 @@ export interface SeasonState {
 
 /** Upgrades a saved season from an older version, or returns null if it cannot be upgraded. */
 export function migrateSave(raw: SeasonState): SeasonState | null {
-  if (raw.version === SAVE_VERSION) return raw;
-  if (raw.version === 3) return { ...raw, version: SAVE_VERSION, seasonStats: {}, careerStats: {} };
+  if (raw.version === SAVE_VERSION) return { ...raw, shape: raw.shape ?? "sweeper" };
+  if (raw.version === 3) return { ...raw, version: SAVE_VERSION, seasonStats: {}, careerStats: {}, shape: raw.shape ?? "sweeper" };
   return null;
 }
 
@@ -73,6 +78,7 @@ export function newGame(seed: number, managedId: string, gender: Gender = "men")
     season: 1,
     managedId,
     tactic: me.style,
+    shape: "sweeper",
     training: "attack",
     teams,
     fixtures,
@@ -98,7 +104,7 @@ export function managedFixture(s: SeasonState): Fixture | undefined {
 }
 
 /** Builds a steppable simulation for a fixture, using the manager's tactic for their own club. */
-export function buildSim(s: SeasonState, f: Fixture): MatchSim {
+export function buildSim(s: SeasonState, f: Fixture, live = false): MatchSim {
   const home = teamById(s, f.homeId);
   const away = teamById(s, f.awayId);
   return new MatchSim({
@@ -109,6 +115,11 @@ export function buildSim(s: SeasonState, f: Fixture): MatchSim {
     away,
     homeTactic: home.id === s.managedId ? s.tactic : home.style,
     awayTactic: away.id === s.managedId ? s.tactic : away.style,
+    homeShape: home.id === s.managedId ? s.shape : SHAPE_BY_STYLE[home.style],
+    awayShape: away.id === s.managedId ? s.shape : SHAPE_BY_STYLE[away.style],
+    // AI clubs always adapt after a card; the manager decides themselves when watching live.
+    homeAuto: !(live && home.id === s.managedId),
+    awayAuto: !(live && away.id === s.managedId),
     seed: hashSeed(s.seed, s.season, f.id),
   });
 }
@@ -126,7 +137,14 @@ export function playMatchday(prev: SeasonState, managedLog?: MatchLog): { state:
   const logs: MatchLog[] = [];
   for (const f of state.fixtures.filter((x) => x.matchday === state.matchday)) {
     const log = managedLog && managedLog.id === f.id ? managedLog : buildSim(state, f).runToEnd().toLog();
-    f.result = { homeScore: log.homeScore, awayScore: log.awayScore, homeTries: log.homeTries, awayTries: log.awayTries };
+    const best = playerOfTheMatch(log);
+    f.result = {
+      homeScore: log.homeScore,
+      awayScore: log.awayScore,
+      homeTries: log.homeTries,
+      awayTries: log.awayTries,
+      ...(best ? { potm: { id: best.line.id, name: best.line.name, club: best.club, rating: best.rating } } : {}),
+    };
     logs.push(log);
   }
 
@@ -173,22 +191,6 @@ export function bestReplacement(team: Team, slot: Role, exclude: Set<string>) {
     .filter((p) => !exclude.has(p.id) && !isSuspended(p))
     .sort((a, b) => Number(b.role === slot) - Number(a.role === slot) || overall(b) - overall(a))[0];
 }
-
-/** One-line description of a player's match for the news and the post-match panel. */
-export function describeLine(l: PlayerLine): string {
-  const bits: string[] = [];
-  if (l.tries) bits.push(`${l.tries} ${l.tries === 1 ? "try" : "tries"}`);
-  const kicks = l.conversions * 2 + l.penaltyGoals * 3 + l.dropGoals * 3;
-  if (kicks) bits.push(`${kicks} from the boot`);
-  if (l.lineBreaks) bits.push(`${l.lineBreaks} line ${l.lineBreaks === 1 ? "break" : "breaks"}`);
-  if (l.tackles >= 4) bits.push(`${l.tackles} tackles`);
-  if (l.turnovers) bits.push(`${l.turnovers} ${l.turnovers === 1 ? "turnover" : "turnovers"} won`);
-  if (l.metres >= 30) bits.push(`${l.metres}m gained`);
-  return bits.join(", ") || `${l.carries} carries, ${l.tackles} tackles`;
-}
-
-/** Roughly how much a player's match mattered, for picking the standout. */
-export const impact = (l: PlayerLine) => l.points + l.tackles * 0.6 + l.metres / 15 + l.lineBreaks * 1.5 + l.turnovers * 2 - l.yellows * 2 - l.reds * 6;
 
 /**
  * Adds the matchday's player stats to the season, serves bans, and applies new ones.

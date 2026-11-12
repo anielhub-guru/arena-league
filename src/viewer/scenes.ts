@@ -1,4 +1,4 @@
-import type { MatchEvent } from "../engine/types";
+import type { MatchEvent, ShapeId, TacticId } from "../engine/types";
 
 /**
  * Highlight choreography.
@@ -118,19 +118,61 @@ class SceneBuilder {
 }
 
 /** Attackers in echelon around the holder; the Pivot stays close behind when someone else has it. */
+/**
+ * How the two sides are set up for the scene being built: the attacking and defending tactic
+ * and the defence's shape. buildScene sets this before it lays out a scene (it is synchronous),
+ * so formation() and line() can show the tactic and shape without threading them everywhere.
+ */
+interface Style {
+  ta: TacticId;
+  td: TacticId;
+  sd: ShapeId;
+  /** Lineup slots of defenders who are not on the pitch (sin bin or sent off). */
+  offD: number[];
+}
+const DEFAULT_STYLE: Style = { ta: "balanced", td: "balanced", sd: "sweeper", offD: [] };
+let STYLE: Style = DEFAULT_STYLE;
+
+/** Attackers: how deep they stand behind the ball and how widely they spread. */
+const ATTACK_DEPTH: Record<TacticId, number> = { attacking: 0.7, balanced: 1, defensive: 1.4, territory: 1 };
+const ATTACK_SPREAD: Record<TacticId, number> = { attacking: 1.2, balanced: 1, defensive: 0.85, territory: 1 };
+/** Defence: metres added to the depth of the defensive line (negative = a higher, more aggressive line). */
+const LINE_DEPTH: Record<TacticId, number> = { attacking: -1.5, balanced: 0, defensive: 2.5, territory: 1 };
+
 function formation(p: Pos, bx: number, by: number, holder: number) {
+  const depth = ATTACK_DEPTH[STYLE.ta];
+  const spread = ATTACK_SPREAD[STYLE.ta];
+  const lane = (i: number) => clamp(0.5 + (LANE_A[i] - 0.5) * spread, 0.06, 0.94);
   for (let i = 0; i < 5; i++) {
     if (i === holder) p[A(i)] = { x: bx, y: by };
-    else if (i === 2) p[A(i)] = { x: bx - 2.5, y: lerp(0.5, by, 0.5) };
-    else p[A(i)] = { x: bx - BACK_A[i], y: lerp(LANE_A[i], by, 0.2) };
+    // The Pivot stands deeper when the plan is to kick for territory.
+    else if (i === 2) p[A(i)] = { x: bx - (STYLE.ta === "territory" ? 4.5 : 2.5), y: lerp(0.5, by, 0.5) };
+    else p[A(i)] = { x: bx - BACK_A[i] * depth, y: lerp(lane(i), by, 0.2) };
   }
+}
+
+/** Lane and depth of each defender for a shape; the line members are spaced out evenly. */
+function defenceLanes(): Record<number, number> {
+  const shape = STYLE.sd;
+  // Who stands in the line for this shape, and across what width.
+  const members = shape === "flat" ? [0, 1, 2, 3, 4] : [0, 1, 2, 3];
+  const [lo, hi] = shape === "narrow" ? [0.33, 0.77] : [0.14, 0.9];
+  const present = members.filter((i) => !STYLE.offD.includes(i));
+  const lanes: Record<number, number> = {};
+  present.forEach((slot, k) => (lanes[slot] = present.length === 1 ? 0.5 : lerp(lo, hi, k / (present.length - 1))));
+  if (shape !== "flat" && !STYLE.offD.includes(4)) lanes[4] = 0.5;
+  return lanes;
 }
 
 /** Defensive line of four with the Sweeper behind. `bite` pulls one defender sideways. */
 function line(p: Pos, bx: number, by: number, depth: number, bite?: { i: number; toY: number }) {
+  const lanes = defenceLanes();
+  const flat = STYLE.sd === "flat";
+  const d = depth - 7 + LINE_DEPTH[STYLE.td];
   for (let i = 0; i < 5; i++) {
-    const x = bx + FRONT_D[i] + (depth - 7) * (i === 4 ? 0.3 : 1);
-    p[D(i)] = { x, y: lerp(LANE_D[i], by, 0.2) };
+    const deep = i === 4 && !flat; // the Sweeper only stands behind the line when the shape says so
+    const x = deep ? bx + FRONT_D[4] + d * 0.3 : bx + (i === 4 ? 7 : FRONT_D[i]) + d;
+    p[D(i)] = { x, y: lerp(lanes[i] ?? LANE_D[i], by, 0.2) };
   }
   if (bite) p[D(bite.i)] = { x: p[D(bite.i)].x - 0.8, y: bite.toY };
 }
@@ -177,9 +219,11 @@ function initShape(x0: number): Pos {
 
 /** Index of the defender standing nearest a lane. */
 function nearestDef(y: number): number {
-  let best = 0;
-  for (let i = 1; i < 4; i++) if (Math.abs(LANE_D[i] - y) < Math.abs(LANE_D[best] - y)) best = i;
-  return best;
+  // The defender standing nearest this lane in the current shape (never the deep Sweeper).
+  const lanes = defenceLanes();
+  const slots = Object.keys(lanes).map(Number).filter((i) => i < 4 || STYLE.sd === "flat");
+  const pool = slots.length ? slots : [0];
+  return pool.reduce((best, i) => (Math.abs(lanes[i] - y) < Math.abs(lanes[best] - y) ? i : best));
 }
 
 interface PlayResult {
@@ -351,7 +395,14 @@ function trySceneEnd(c: Ctx, cid: string, did: string, ty: number) {
  * Players in the sin bin or sent off are not on the pitch, so they are left out of the scene.
  */
 export function buildScene(ev: MatchEvent): Scene | null {
-  const scene = buildFullScene(ev);
+  const c = ev.cast;
+  STYLE = { ta: c?.ta ?? "balanced", td: c?.td ?? "balanced", sd: c?.sd ?? "sweeper", offD: c?.offD ?? [] };
+  let scene: Scene | null;
+  try {
+    scene = buildFullScene(ev);
+  } finally {
+    STYLE = DEFAULT_STYLE;
+  }
   const cast = ev.cast;
   if (!scene || !cast || (!cast.offA?.length && !cast.offD?.length)) return scene;
   return withoutOffPlayers(scene, [...(cast.offA ?? []).map(A), ...(cast.offD ?? []).map(D)]);
@@ -431,7 +482,7 @@ function buildFullScene(ev: MatchEvent): Scene | null {
     if (ev.variant === "break") {
       const mid = p.bx + Math.max(4, (100 - p.bx) * 0.35);
       burstTo(c, ai, p.bx, mid, ty, { depth: 4, bite: p.bite, extra: { cap: "Into the gap! A defender dives and misses.", banner: { text: "BREAK!", color: GREEN }, hits: [{ kind: "miss", runner: cid, other: D(nearestDef(ty)), at: 0.55 }] } });
-      burstTo(c, ai, mid, 98, ty, { beaten: true, chase: 4, extra: { cap: "Clear of the defence. The Sweeper dives, but too late.", hits: [{ kind: "miss", runner: cid, other: D(4), at: 0.75 }] } });
+      burstTo(c, ai, mid, 98, ty, { beaten: true, chase: 4, extra: { cap: STYLE.sd === "flat" ? "Clear of a flat line: there is no Sweeper behind it to stop the try" : "Clear of the defence. The Sweeper dives, but too late.", hits: [{ kind: "miss", runner: cid, other: D(4), at: 0.75 }] } });
     } else {
       const tx = Math.min(95, p.bx + Math.max(4, (100 - p.bx) * 0.6));
       burstTo(c, ai, p.bx, tx, ty, { depth: 3, tackler: did, bite: p.bite, extra: { cap: "Head down, straight at the defender" } });

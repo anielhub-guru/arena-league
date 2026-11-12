@@ -20,6 +20,8 @@ export interface Player {
 }
 
 export type TacticId = "balanced" | "attacking" | "defensive" | "territory";
+/** Defensive shape: where the defence puts its weight. */
+export type ShapeId = "sweeper" | "flat" | "narrow";
 
 export type Gender = "men" | "women";
 
@@ -72,6 +74,11 @@ export interface HighlightCast {
   offA?: number[];
   /** Lineup slots of defenders who are in the sin bin or sent off. */
   offD?: number[];
+  /** Attacking and defending tactic and defensive shape, so the animation can show them. */
+  ta?: TacticId;
+  td?: TacticId;
+  sa?: ShapeId;
+  sd?: ShapeId;
 }
 
 export interface MatchEvent {

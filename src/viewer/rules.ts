@@ -1,5 +1,5 @@
 import { h } from "../dom";
-import { BIN_PHASES, MAX_SUBS, PHASES, RED_BAN, TACTICS } from "../engine/match";
+import { BIN_PHASES, MAX_SUBS, PHASES, RED_BAN, TACTICS, SHAPES } from "../engine/match";
 
 /**
  * The rulebook. Everything here describes what the engine actually does, so the commentary,
@@ -184,6 +184,10 @@ const SECTIONS: Section[] = [
         ["Tactic", "Plays like", "Cards"],
         (Object.values(TACTICS)).map((t) => [t.label, t.description.replace(/\s*(Fewer cards|Hard tackling means more cards|Slightly more cards)\.?$/, ""), `${t.card}x`]),
       ),
+      h("h4", {}, "Defensive shape"),
+      p("Tactic is how ambitious you are. Shape is how your defence stands, and it is how you cover a man down. You can see it on the pitch in highlights: the defensive line, how deep it stands and where the Sweeper is."),
+      tbl(["Shape", "What it does"], Object.values(SHAPES).map((sh) => [sh.label, sh.description])),
+      p("Before each match the Squad tab recommends a shape against your next opponent's attack (a quick Winger, powerful forwards, or a balanced attack). If one of your players is carded in a match you are watching, the game pauses and asks how you want to cover. If you quick-sim, the game picks the best fit for you."),
       h("h4", {}, "Team talk"),
       p("At half time you pick a team talk. Fire them up gives more ambition and a few more mistakes. Stay calm gives fewer errors and steady carries. Gamble might inspire a comeback or backfire."),
       h("h4", {}, "Substitutions and energy"),

@@ -1,9 +1,10 @@
 import { h } from "../dom";
-import { MAX_SUBS, MatchSim, TACTICS, TALKS, type TalkId } from "../engine/match";
-import type { EventType, MatchEvent, MatchLog, TacticId, Team } from "../engine/types";
+import { MAX_SUBS, MatchSim, SHAPES, TACTICS, TALKS, adviseShape, type TalkId } from "../engine/match";
+import type { EventType, MatchEvent, MatchLog, ShapeId, TacticId, Team } from "../engine/types";
 import { ArenaView } from "./arena";
 import { buildScene } from "./scenes";
 import { scorerLines, standoutLines, statBars } from "./text";
+import { describeLine, playerOfTheMatch, teamBest } from "../league/awards";
 
 export interface LiveOptions {
   home: Team;
@@ -100,6 +101,7 @@ export class LiveMatch {
   private replayBatches: MatchEvent[][] = [];
   private replayIdx = 0;
   private talkBox: HTMLElement | null = null;
+  private coverBox: HTMLElement | null = null;
   /** Players currently off the pitch, from the events seen so far (works for live matches and replays). */
   private carded = new Map<string, { name: string; team: string; kind: "bin" | "off" }>();
   private discipline = h("div", { class: "discipline" });
@@ -200,6 +202,15 @@ export class LiveMatch {
       tacticHelp.textContent = TACTICS[tactic.value as TacticId].description;
     };
 
+    const advised = adviseShape(sim.sides[ms === 0 ? 1 : 0].field);
+    const shape = h("select");
+    for (const [id, sh] of Object.entries(SHAPES)) shape.append(h("option", { value: id, selected: id === side.shape }, `${sh.label}${id === advised.best ? " (advised)" : ""}`));
+    const shapeHelp = h("div", { class: "hint" }, SHAPES[side.shape].description);
+    shape.onchange = () => {
+      sim.setShape(ms, shape.value as ShapeId);
+      shapeHelp.textContent = SHAPES[shape.value as ShapeId].description;
+    };
+
     const cond = h("table", { class: "cond" });
     for (const p of side.field) {
       const e = sim.energy(ms, p);
@@ -231,12 +242,14 @@ export class LiveMatch {
     this.manage.append(
       h("h3", {}, side.team.name),
       h("div", { class: "lbl" }, "Tactic"), tactic, tacticHelp,
+      h("div", { class: "lbl" }, "Defensive shape"), shape, shapeHelp,
       h("div", { class: "lbl" }, `Energy (tired players play worse). ${sim.onPitch(ms)} on the pitch`), cond,
       h("div", { class: "lbl" }, `Substitutions (${side.subs}/${MAX_SUBS} used)`),
       outSel, inSel, subBtn,
       h("div", { class: "hint" }, "Opening a control pauses the match. Use the Resume button at the top of this panel when you're done."),
     );
     if (this.talkBox) this.resumeBar.after(this.talkBox);
+    if (this.coverBox) this.resumeBar.after(this.coverBox);
   }
 
   // ---------------------------------------------------------------- flow
@@ -252,6 +265,10 @@ export class LiveMatch {
 
   private setPaused(p: boolean) {
     this.paused = p;
+    if (!p && this.coverBox) {
+      this.coverBox.remove();
+      this.coverBox = null;
+    }
     this.resumeBar.hidden = !(p && this.started && !!this.opts.sim && !this.done);
     this.pauseBtn.textContent = p ? (this.started ? "Resume" : "Kick off") : "Pause";
     if (!p) {
@@ -376,6 +393,12 @@ export class LiveMatch {
     await this.holdPrevious();
     if (this.disposed) return;
     this.reveal(ev);
+    const sim = this.opts.sim;
+    const ms = this.opts.managedSide;
+    if (sim && ms !== undefined && (ev.type === "yellow" || ev.type === "red") && ev.team === ms) {
+      this.showCover(ev.type === "red");
+      this.setPaused(true);
+    }
     if (ev.type === "halftime") {
       this.clockFrozen = true;
       this.clockSec = Math.max(this.clockSec, 1200);
@@ -463,6 +486,29 @@ export class LiveMatch {
     this.status.textContent = "Half time. Give your team talk, change tactics or substitute.";
   }
 
+  /** A card against the manager's side: pause and ask how the defence should cover the gap. */
+  private showCover(red: boolean) {
+    const { sim, managedSide: ms } = this.opts;
+    if (!sim || ms === undefined) return;
+    const advised = adviseShape(sim.sides[ms === 0 ? 1 : 0].field);
+    const box = h("div", { class: "coverbox" }, h("div", { class: "lbl" }, red ? "Red card: a man down for the rest of the match" : "Yellow card: a man down for ten minutes"), h("div", { class: "hint" }, "How do you cover the gap? " + advised.why));
+    for (const [id, sh] of Object.entries(SHAPES)) {
+      const rec = id === advised.best;
+      const b = h("button", { title: sh.description }, h("b", {}, sh.label), rec ? h("span", { class: "rec" }, "  recommended") : null, h("br"), sh.description);
+      b.onclick = () => {
+        sim.setShape(ms, id as ShapeId);
+        this.coverBox = null;
+        box.remove();
+        this.updateManage();
+        this.setPaused(false);
+      };
+      box.append(b);
+    }
+    this.coverBox = box;
+    this.resumeBar.after(box);
+    this.status.textContent = "Card! Choose how to cover, or press Resume to keep your shape.";
+  }
+
   private finish() {
     this.done = true;
     this.resumeBar.hidden = true;
@@ -475,7 +521,8 @@ export class LiveMatch {
     const log = sim ? sim.toLog() : replay!;
     this.stage.classList.remove("hl");
     this.arena.clear();
-    this.cmTag.textContent = "FULL TIME";
+    const potm = playerOfTheMatch(log);
+    this.cmTag.textContent = potm ? `FULL TIME  ·  ★ PLAYER OF THE MATCH: ${potm.line.name.toUpperCase()} (${potm.rating.toFixed(1)})` : "FULL TIME";
     const fresh = h("div", { class: "cm-text fresh t-fulltime key" }, `${log.homeName} ${log.homeScore} - ${log.awayScore} ${log.awayName}`);
     this.cmText.replaceWith(fresh);
     this.cmText = fresh;
@@ -489,7 +536,16 @@ export class LiveMatch {
     exitBtn.onclick = exit;
     this.manage.classList.add("on");
     const standout = standoutLines(log);
-    this.manage.replaceChildren(h("h3", {}, "Full time"), h("div", { class: "exit" }, exitBtn), h("div", { class: "lbl" }, "Scorers and cards"), h("pre", { class: "scorers" }, scorerLines(log).join("\n") || "No scores."), ...(standout.length ? [h("div", { class: "lbl" }, "Standout players"), h("pre", { class: "scorers" }, standout.join("\n"))] : []), h("div", { class: "lbl" }, "Match stats"), statBars(log));
+    const [bestHome, bestAway] = teamBest(log);
+    const award = potm
+      ? [
+          h("div", { class: "lbl" }, "Player of the match"),
+          h("div", { class: "potm" }, h("div", { class: "potm-name" }, `★ ${potm.line.name}`), h("div", { class: "dim" }, `${potm.club}  ·  rating ${potm.rating.toFixed(1)}`), h("div", {}, describeLine(potm.line))),
+          h("div", { class: "lbl" }, "Best on each side"),
+          ...[bestHome, bestAway].filter((r) => r !== null).map((r) => h("div", { class: "mvp" }, h("b", {}, r!.line.name), h("span", { class: "dim" }, `  ${r!.club}  ${r!.rating.toFixed(1)}`))),
+        ]
+      : [];
+    this.manage.replaceChildren(h("h3", {}, "Full time"), h("div", { class: "exit" }, exitBtn), ...award, h("div", { class: "lbl" }, "Scorers and cards"), h("pre", { class: "scorers" }, scorerLines(log).join("\n") || "No scores."), ...(standout.length ? [h("div", { class: "lbl" }, "Standout players"), h("pre", { class: "scorers" }, standout.join("\n"))] : []), h("div", { class: "lbl" }, "Match stats"), statBars(log));
     this.root.classList.add("with-manage");
   }
 }
