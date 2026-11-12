@@ -47,10 +47,24 @@ export interface TacticProfile {
 
 export const TACTICS: Record<TacticId, TacticProfile> = {
   balanced: { label: "Balanced", description: "Mix of carries and kicks. No extra risk.", kick: 0.12, gain: 0, error: 0, defence: 0, card: 1 },
-  attacking: { label: "Attacking", description: "Keep ball in hand. More metres, more errors, looser defence. Fewer cards.", kick: 0.04, gain: 1.5, error: 0.02, defence: -2, card: 0.8 },
+  attacking: { label: "Attacking", description: "Keep ball in hand. Strong for a side with pace and handling: more metres and fewer cards. A side without them makes errors and gets countered. Looser defence.", kick: 0.04, gain: 1.5, error: 0.02, defence: -2, card: 0.8 },
   defensive: { label: "Defensive", description: "Compact line speed. Fewer errors, fewer metres. Hard tackling means more cards.", kick: 0.16, gain: -1, error: -0.01, defence: 2, card: 1.5 },
   territory: { label: "Territory", description: "Kick long and squeeze them. Tight defence, little ball in hand. Slightly more cards.", kick: 0.2, gain: -0.5, error: 0, defence: 1, card: 1.25 },
 };
+
+/**
+ * Attacking needs the tools to play with the ball in hand. How well a lineup suits it ("fit", -1 to 1)
+ * comes from the average of pace and handling: at about 62 it is neutral, at 72 or more it is full marks,
+ * and at 52 or less the side is reckless. Fit scales the metres gained and the knock-on rate, and decides
+ * how hard the other side counters when the ball is lost.
+ */
+export const ATTACK = { centre: 62, spread: 10, gain0: 0.3, gain1: 0.6, error0: 0.011, error1: 0.003, counter0: 0.5, counter1: 1.2 };
+
+export function attackFit(players: Player[], rating: (p: Player, k: Attr) => number = (p, k) => p[k]): number {
+  if (!players.length) return 0;
+  const skill = players.reduce((t, p) => t + (rating(p, "pace") + rating(p, "handling")) / 2, 0) / players.length;
+  return clamp((skill - ATTACK.centre) / ATTACK.spread, -1, 1);
+}
 
 export type TalkId = "fire" | "calm" | "gamble";
 export const TALKS: Record<TalkId, { label: string; description: string }> = {
@@ -236,6 +250,9 @@ export class MatchSim {
   private att: 0 | 1 = 0;
   private pos = 35;
   private tackles = 0;
+  /** After an attacking side loses the ball, the side that won it counters: extra metres on its next carry. */
+  private counterSide: -1 | 0 | 1 = -1;
+  private counterBonus = 0;
   private phaseAtt: 0 | 1 = 0;
   private cA?: Side;
   private cD?: Side;
@@ -428,6 +445,12 @@ export class MatchSim {
     this.tackles = 0;
   }
 
+  /** The side that has just won the ball back from an attacking side hits it while it is stretched. */
+  private startCounter(fit: number) {
+    this.counterSide = this.att;
+    this.counterBonus = ATTACK.counter0 + ATTACK.counter1 * (1 - fit);
+  }
+
   private eff(side: Side, p: Player, k: Attr): number {
     const played = this.phase - (side.entered.get(p.id) ?? 0);
     return p[k] * (1 - (played / PHASES) * (1 - p.stamina / 100) * 0.45);
@@ -569,6 +592,12 @@ export class MatchSim {
     this.releaseBin();
     const aOn = this.avail(A);
     const dOn = this.avail(D);
+    const attacking = A.tactic === "attacking";
+    const fit = attacking ? attackFit(aOn, (p, k) => this.eff(A, p, k)) : 0;
+    const tactGain = attacking ? ATTACK.gain0 + ATTACK.gain1 * fit : aT.gain;
+    const tactError = attacking ? ATTACK.error0 - ATTACK.error1 * fit : aT.error;
+    const counter = this.counterSide === att ? this.counterBonus : 0;
+    this.counterSide = -1;
     const downA = A.field.length - aOn.length;
     const downD = D.field.length - dOn.length;
     A.stats.possession++;
@@ -632,7 +661,7 @@ export class MatchSim {
 
     if (carrier.role !== "Pivot") {
       const icp = rng.weighted(dOn, (p) => eD(p, "handling") + eD(p, "pace"));
-      const pI = clamp(0.015 + (eD(icp, "handling") - eA(carrier, "handling")) / 1500 + (A.tactic === "attacking" ? 0.008 : 0), 0.004, 0.045);
+      const pI = clamp(0.015 + (eD(icp, "handling") - eA(carrier, "handling")) / 1500 + (attacking ? 0.004 * (1 - fit) : 0), 0.004, 0.045);
       if (rng.chance(pI)) {
         const run = rng.int(8, 35);
         A.stats.errors++;
@@ -640,17 +669,19 @@ export class MatchSim {
         this.lineOf(D, icp).turnovers++;
         this.give(100 - pos);
         this.pos = Math.min(95, this.pos + run);
+        if (attacking) this.startCounter(fit);
         this.emit("intercept", this.narrator.intercept(this.facts(A, D, { ...names, t: icp.name, run })), true, di, icp.name, undefined, { hl: true, ai: A.field.indexOf(carrier), di: D.field.indexOf(icp) });
         return;
       }
     }
 
-    const errP = clamp(0.02 + (70 - eA(carrier, "handling")) / 600 + aT.error + A.mod.error, 0.01, 0.15);
+    const errP = clamp(0.02 + (70 - eA(carrier, "handling")) / 600 + tactError + A.mod.error, 0.01, 0.15);
     if (rng.chance(errP)) {
       A.stats.errors++;
       D.stats.turnoversWon++;
       this.emit("knock-on", this.narrator.knockOn(this.facts(A, D, names)), pos >= 68, att, carrier.name, undefined, { hl: pos >= 68, ai: A.field.indexOf(carrier), di: D.field.indexOf(tackler) });
       this.give(100 - pos);
+      if (attacking) this.startCounter(fit);
       return;
     }
 
@@ -662,7 +693,7 @@ export class MatchSim {
     const wide = carrier.role === "Winger";
     const dm = downD * dS.manDown; // the shape decides how badly a man down hurts
     const defRating = 0.5 * defAvg + 0.5 * (eD(tackler, "tackling") + dT.defence) - 5 * dm;
-    let gain = 8.5 + (atk - defRating) / 12 + aT.gain + A.mod.gain + 1.5 * dm - 1.2 * downA + (wide ? dS.wide : dS.mid) + rng.signed() * 8;
+    let gain = 8.5 + (atk - defRating) / 12 + tactGain + counter + A.mod.gain + 1.5 * dm - 1.2 * downA + (wide ? dS.wide : dS.mid) + rng.signed() * 8;
     let broke = false;
     let covered = false;
     const sweeper = dOn.find((p) => p.role === "Sweeper");

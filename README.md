@@ -51,7 +51,11 @@ Any finished match can be replayed, with its highlights, from the overview or th
 
 The League Table has movement arrows (places gained or lost since the previous matchday), a form column, and your club highlighted.
 
-**Careers and the offseason.** Players have a hidden *potential* (a ceiling on overall). Under 28 they grow toward it, from 31 they fade and the ceiling drops, and they retire from 31 (10%, then 25%, 45%, 70%, certain by 35). Between seasons you pick a replacement for each retiree from three scouted prospects (aged 17 to 19; the star rating is a scouting estimate that can be about one star off), and you may swap your oldest player for a younger one. The season starts when you confirm; **Auto-pick** takes the best scouted prospects. AI clubs take their best prospect. Weekly training can no longer lift a player past their potential.
+**Careers and the offseason.** Players have a hidden *potential* (a ceiling on overall). Under 28 they grow toward it, from 31 they fade and the ceiling drops, and from 31 they can retire (10%, then 25%, 45%, 70%, certain by 35). Weekly training can never lift a player past their potential. Between seasons an offseason screen opens. You must refill your squad to eight with a natural player in each position; everything else is optional: **sell** any player, **sign** teenage prospects from the youth shortlist (three per position that lost a player, one for the rest; the star rating is a scouting estimate that can be about one star off), and **buy** from the transfer list (each other club lists one player, mostly veterans and bench players; at most 2 signings a window; the selling club replaces them with a youngster). Prospects you do not sign are sold for income. **Auto-pick** (Reset to default) just fills retirements with the best scouted prospects.
+
+**Money.** Only your club keeps a balance (AI clubs are balanced by design). Income: match winnings, prize money by final position, selling players, selling unpicked prospects. Outgoings: a yearly wage bill that grows with squad quality, and transfers. Values come from ability, young potential and age; asking prices follow true value, which includes potential you cannot see. A club can get rich; what limits money is the market, not the budget. Debt never blocks the season, it only stops you buying. The constants are in `src/league/economy.ts`.
+
+**Attacking.** Its bonus depends on the average pace and handling of your five: about 62 is neutral, 72 is ideal, 52 or less is reckless. A badly suited side that attacks makes errors and is countered when it loses the ball. The Squad tab shows your suitability. AI clubs that cannot play Attacking fall back to Balanced. Measured (same overall, vs Balanced): about 40% unsuited, 53% neutral, 61 to 68% well suited (`tests/attacking.test.ts`). Defensive and Territory are still weaker than Balanced; that has not been rebalanced.
 
 Dominion rules: 40 minutes (80 phases), a 100m arena, sets of up to six tackles. Kicks, knock-ons, jackal turnovers and penalties swing territory. Scoring: try 5, conversion 2, penalty goal 3, drop goal 3. Table points: win 4, draw 2, +1 for 3+ tries, +1 for losing by 7 or fewer. Matches are deterministic from the save seed until you intervene. After matchday 14, start the next season (players age, ratings drift).
 
@@ -77,7 +81,7 @@ After each matchday the app writes full match logs first, then the season, to th
 - Windows: `%LOCALAPPDATA%\com.arenaleague.manager\`
 - Linux: `~/.local/share/com.arenaleague.manager/`
 
-Contents: `season.json` and `matches/<fixtureId>.json`. Each write keeps the previous save as `season.bak.json`. Saves from version 3 and 4 are upgraded on load; older ones are not compatible. The path is shown in the footer. In a plain browser (`npm run dev` without Tauri) it falls back to localStorage.
+Contents: `season.json` and `matches/<fixtureId>.json`. Each write keeps the previous save as `season.bak.json`. Saves from versions 3 to 5 are upgraded on load; older ones are not compatible. The path is shown in the footer. In a plain browser (`npm run dev` without Tauri) it falls back to localStorage.
 
 ## Prerequisites (all platforms)
 
@@ -119,13 +123,13 @@ Tested on macOS 26 (Darwin 25.4), **Intel x86_64** host, Node 22, Rust 1.96.
 
 | Item | Status |
 |---|---|
-| TypeScript tests (`npm test`) | Pass (43 tests: engine, balance, highlights and scenes, cards and discipline, defensive shapes, player of the match, league, version consistency, 50-season lifecycle and balance) |
+| TypeScript tests (`npm test`) | Pass (52 tests: engine, balance, highlights and scenes, cards and discipline, defensive shapes, player of the match, league, version consistency, attacking balance, 50-season lifecycle, offseason and economy) |
 | Movement physics | Stepped frame by frame in a browser for every highlight kind: no teleporting (player steps stay within top speed), ball moves continuously (max about 0.5 m per frame). Acceleration spikes only at scripted tackles. |
 | Kick outcomes | All five rendered and checked by eye: good, off the post and in, off the post, wide, short. |
 | Resume button | Driven with a real click in a 560px-high window: appears when the substitution controls are touched, stays after a substitution, resumes the match. |
 | Cards, stats, commentary and rulebook UI | Driven in headless Chromium against the production web build (Playwright): rules dialog opens with all 13 sections and tables fit, Squad tab shows season stats, a watched match shows the sin-bin chip, the 4-on-the-pitch count and a man-down highlight, the full-time panel lists cards and standout players, no page errors. **Not clicked through in the browser:** the SUSPENDED tag, the swap guard and the career toggle (the ban logic and career maths are unit-tested). |
 | Rust tests (`cargo test`) | Pass (3 tests: id sanitising, atomic save round trip, backup of the previous save) |
-| Offseason screen (0.3.0) | **Not clicked through in a browser or the app.** The logic is unit-tested and the production build compiles; the intake card, Pot column and locked buttons have not been seen on screen. |
+| Offseason screen, money display, attacking hint | **Not clicked through in a browser or the app.** The logic is unit-tested and the production build compiles; the offseason tables, buttons and header have not been seen on screen. |
 | UI behaviour | Driven end to end in headless Chrome against the production web build: club pick, quick sim, table arrows, lineup swap, tactic/training, live match with substitution, half-time talk, skip, continue, reload restores the season (localStorage backend), replay. No page errors. |
 | macOS x86_64 `.app` and `.dmg` | Built earlier and installed, but **not rebuilt since cards, stats, the new commentary and the rulebook were added**, so the installed app is out of date. Run `npm run tauri build -- --bundles app,dmg` to refresh it. |
 | macOS arm64 / universal | Not built |

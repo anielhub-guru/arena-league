@@ -1,6 +1,7 @@
 import { h } from "./dom";
 import { ATTRS, ROLES, type Gender, type MatchLog, type Player, type ShapeId, type TacticId, type Team } from "./engine/types";
-import { SHAPES, TACTICS, adviseShape, slotPlayer } from "./engine/match";
+import { SHAPES, TACTICS, adviseShape, attackFit, slotPlayer } from "./engine/match";
+import { MAX_BUYS, fmtMoney, sellPrice, teenSalePrice, wageOf } from "./league/economy";
 import {
   TRAINING,
   buildSim,
@@ -15,8 +16,10 @@ import {
   teamById,
   type SeasonState,
   type TrainingFocus,
-  autoPicks,
-  signProspects,
+  autoPlan,
+  checkPlan,
+  completeOffseason,
+  type OffseasonPlan,
 } from "./league/season";
 import { computeStandings, teamForm } from "./league/standings";
 import { TEAM_DEFS, generateTeams, overall, potentialStars, teamRating } from "./league/teams";
@@ -322,51 +325,105 @@ function card(title: string, ...kids: (Node | string)[]): HTMLElement {
 
 const stars = (v: number) => "★".repeat(potentialStars(v)) + "☆".repeat(5 - potentialStars(v));
 
-/** Offseason decisions: a prospect for each retirement, and an optional succession signing. */
-let intakePicks: Record<number, string | null> = {};
+/** The offseason plan being built on screen. It starts from the sensible default and the manager changes it. */
+let plan: OffseasonPlan = { sell: [], sign: [], buy: [] };
+let planKey = "";
 
-function intakeCard(s: SeasonState): HTMLElement {
+const toggle = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+
+function offseasonCard(s: SeasonState): HTMLElement {
+  const intake = s.intake!;
+  const key = `${s.seed}:${s.season}`;
+  if (planKey !== key) {
+    plan = autoPlan(s);
+    planKey = key;
+  }
   const team = teamById(s, s.managedId);
-  const slots = s.intake!.slots;
-  const blocks = slots.map((slot, i) => {
-    const out = team.players.find((p) => p.id === slot.outId)!;
-    const title = slot.optional
-      ? `Optional: bring in a successor for ${out.name} (${out.role}, ${out.age}, overall ${overall(out)}, ${stars(out.potential ?? 0)})`
-      : `${out.name} (${out.role}, ${out.age}) is retiring. Choose a replacement.`;
-    const t = h("table", { class: "squad" });
-    t.append(h("thead", {}, h("tr", {}, h("th", {}, ""), h("th", { class: "club" }, "Prospect"), h("th", {}, "Age"), h("th", { title: "Scouting estimate of how good they can become. Reports can be off by about a star." }, "Potential"), ...ATTRS.map((a) => h("th", { title: ATTR_INFO[a][1] }, ATTR_INFO[a][0])), h("th", {}, "Overall"))));
-    const body = h("tbody");
-    const choose = (id: string | null) => {
-      intakePicks[i] = id;
+  const check = checkPlan(s, plan);
+  const retiring = new Set(intake.retiring);
+  const attrHead = ATTRS.map((a) => h("th", { title: ATTR_INFO[a][1] }, ATTR_INFO[a][0]));
+  const attrCells = (p: Player) => ATTRS.map((a) => h("td", {}, String(p[a])));
+  const act = (label: string, on: boolean, fn: () => void, disabled = false) => {
+    const b = h("button", { class: on ? "primary" : "", disabled }, label);
+    b.onclick = () => {
+      fn();
       render();
     };
-    if (slot.optional) {
-      const keep = h("tr", { class: `click ${(intakePicks[i] ?? null) === null ? "sel" : ""}` }, h("td", {}, (intakePicks[i] ?? null) === null ? "●" : "○"), h("td", { class: "club", colSpan: 10 }, `Keep ${out.name}`));
-      keep.onclick = () => choose(null);
-      body.append(keep);
-    }
-    for (const o of slot.options) {
-      const on = intakePicks[i] === o.id;
-      const tr = h("tr", { class: `click ${on ? "sel" : ""}` }, h("td", {}, on ? "●" : "○"), h("td", { class: "club" }, o.name), h("td", {}, String(o.age)), h("td", { class: "stars" }, stars(o.scouted ?? 0)), ...ATTRS.map((a) => h("td", {}, String(o[a]))), h("td", { class: "pts" }, String(overall(o))));
-      tr.onclick = () => choose(o.id);
-      body.append(tr);
-    }
-    t.append(body);
-    return h("div", {}, h("p", {}, h("b", {}, title)), t);
-  });
-  const ready = slots.every((slot, i) => slot.optional || !!intakePicks[i]);
-  const confirm = h("button", { class: "primary", disabled: busy || !ready }, "Confirm signings and start the season");
-  confirm.onclick = () =>
-    void guarded(async () => {
-      await persist(signProspects(s, intakePicks));
-      intakePicks = {};
-    });
-  const auto = h("button", {}, "Auto-pick");
-  auto.onclick = () => {
-    intakePicks = autoPicks(s);
+    return b;
+  };
+
+  // 1. Your squad: sell anyone not retiring.
+  const squad = h("table", { class: "squad" });
+  squad.append(h("thead", {}, h("tr", {}, h("th", { class: "club" }, "Your squad"), h("th", {}, "Role"), h("th", {}, "Age"), h("th", {}, "Pot"), ...attrHead, h("th", {}, "Overall"), h("th", { title: "What a club pays you for them" }, "Sale price"), h("th", { title: "Paid each season" }, "Wage"), h("th", {}, ""))));
+  const sb = h("tbody");
+  for (const p of team.players) {
+    const gone = retiring.has(p.id);
+    const sold = plan.sell.includes(p.id);
+    sb.append(
+      h("tr", { class: gone || sold ? "bench" : "" },
+        h("td", { class: "club" }, p.name, gone ? h("span", { class: "card-chip r" }, "RETIRING") : null, sold ? h("span", { class: "card-chip y" }, "SELLING") : null),
+        h("td", {}, p.role), h("td", {}, String(p.age)), h("td", { class: "stars" }, stars(p.potential ?? 0)), ...attrCells(p),
+        h("td", { class: "pts" }, String(overall(p))), h("td", {}, fmtMoney(sellPrice(p))), h("td", {}, fmtMoney(wageOf(p))),
+        h("td", {}, gone ? "" : act(sold ? "Keep" : "Sell", sold, () => (plan = { ...plan, sell: toggle(plan.sell, p.id) })))),
+    );
+  }
+  squad.append(sb);
+
+  // 2. Youth shortlist. Unpicked prospects are sold, so signing one costs you that sale.
+  const vacated = new Set(intake.retiring.map((id) => team.players.find((p) => p.id === id)!.role));
+  const youth = h("table", { class: "squad" });
+  youth.append(h("thead", {}, h("tr", {}, h("th", { class: "club" }, "Youth shortlist"), h("th", {}, "Role"), h("th", {}, "Age"), h("th", { title: "Scouting estimate of how good they can become. Reports can be off by about a star." }, "Potential"), ...attrHead, h("th", {}, "Overall"), h("th", { title: "What you get if you do not sign them" }, "Sale if unsigned"), h("th", {}, ""))));
+  const yb = h("tbody");
+  for (const p of intake.prospects) {
+    const on = plan.sign.includes(p.id);
+    yb.append(
+      h("tr", { class: on ? "sel" : "" },
+        h("td", { class: "club" }, p.name, vacated.has(p.role) ? h("span", { class: "oop", title: "Fills a retirement" }, " ●") : null),
+        h("td", {}, p.role), h("td", {}, String(p.age)), h("td", { class: "stars" }, stars(p.scouted ?? 0)), ...attrCells(p),
+        h("td", { class: "pts" }, String(overall(p))), h("td", {}, fmtMoney(teenSalePrice(p))),
+        h("td", {}, act(on ? "Signed" : "Sign", on, () => (plan = { ...plan, sign: toggle(plan.sign, p.id) })))),
+    );
+  }
+  youth.append(yb);
+
+  // 3. Transfer list: other clubs' players. You see their ratings, not their true potential.
+  const market = h("table", { class: "squad" });
+  market.append(h("thead", {}, h("tr", {}, h("th", { class: "club" }, "Transfer list"), h("th", {}, "Club"), h("th", {}, "Role"), h("th", {}, "Age"), h("th", { title: "Scouting estimate, not the truth" }, "Potential"), ...attrHead, h("th", {}, "Overall"), h("th", {}, "Asking"), h("th", {}, ""))));
+  const mb = h("tbody");
+  for (const l of intake.market) {
+    const p = l.player;
+    const on = plan.buy.includes(p.id);
+    mb.append(
+      h("tr", { class: on ? "sel" : "" },
+        h("td", { class: "club" }, p.name), h("td", {}, teamById(s, l.clubId).short), h("td", {}, p.role), h("td", {}, String(p.age)), h("td", { class: "stars" }, stars(p.scouted ?? 0)), ...attrCells(p),
+        h("td", { class: "pts" }, String(overall(p))), h("td", {}, fmtMoney(l.price)),
+        h("td", {}, act(on ? "Buying" : "Buy", on, () => (plan = { ...plan, buy: toggle(plan.buy, p.id) }), !on && plan.buy.length >= MAX_BUYS))),
+    );
+  }
+  market.append(mb);
+
+  const confirm = h("button", { class: "primary", disabled: busy || !check.ok }, "Confirm and start the season");
+  confirm.onclick = () => void guarded(async () => void (await persist(completeOffseason(s, plan))));
+  const reset = h("button", {}, "Reset to default");
+  reset.onclick = () => {
+    plan = autoPlan(s);
     render();
   };
-  return card(`Season ${s.season}: offseason decisions`, h("p", { class: "dim" }, "Veterans retire and young prospects arrive. Prospects start weaker than the players they replace but grow toward their potential. Pick carefully: potential is only a scouting estimate."), ...blocks, h("div", { class: "toolbar" }, confirm, auto));
+  const money = (label: string, v: number, sign = "") => h("span", { class: "dim" }, `${label} ${sign}${fmtMoney(v)}   `);
+  const summary = h("div", { class: "advice" },
+    h("b", {}, `Squad ${check.size}/8   `), money("Balance now", s.money), money("Unpicked prospects sold", check.teenIncome, "+"), money("Sales", check.sellIncome, "+"), money("Purchases", check.buyCost, "-"), h("b", {}, `Balance after ${fmtMoney(check.moneyAfter)}`));
+  return card(
+    `Season ${s.season}: offseason`,
+    h("p", { class: "dim" }, "Everything here is optional except refilling the squad to eight. Retirees leave, young prospects grow toward a potential you can only estimate, and prospects you do not sign are sold for income. Other clubs' players on the transfer list are priced by what they are really worth, so a good eye finds a bargain and a bad one finds a trap."),
+    summary,
+    ...(check.problems.length ? [h("div", { class: "err" }, check.problems.join(" "))] : []),
+    squad,
+    h("div", { class: "hint" }, `Youth shortlist: ● marks a position that lost a player. Prospects start weaker than established players and grow, so a teenager is an investment.`),
+    youth,
+    h("div", { class: "hint" }, `Transfer list: at most ${MAX_BUYS} signings per offseason. The selling club replaces the player with a youngster.`),
+    market,
+    h("div", { class: "toolbar" }, confirm, reset),
+  );
 }
 
 function overviewView(s: SeasonState): HTMLElement {
@@ -377,7 +434,7 @@ function overviewView(s: SeasonState): HTMLElement {
   const left = h("div", { class: "col" });
 
   if (s.intake) {
-    left.append(intakeCard(s));
+    left.append(offseasonCard(s));
   } else if (isSeasonOver(s)) {
     const champ = teamById(s, table[0].teamId);
     const next = h("button", { class: "primary" }, "Start next season");
@@ -429,6 +486,10 @@ function squadView(s: SeasonState): HTMLElement {
     ? "Now click another player to swap places with them (or click the same player to cancel)."
     : "Click a player, then click another, to swap them. Starters fill the five slots in order; bench players can replace any starter.";
 
+  const starters = team.lineup.map((id, i) => slotPlayer(team.players.find((p) => p.id === id)!, ROLES[i]));
+  const fit = attackFit(starters);
+  const skill = Math.round(starters.reduce((t, p) => t + (p.pace + p.handling) / 2, 0) / starters.length);
+  const fitText = fit >= 0.6 ? "well suited" : fit >= 0.1 ? "a reasonable fit" : fit >= -0.3 ? "a poor fit" : "badly suited";
   const tactics = h("div", { class: "choices" });
   for (const [id, t] of Object.entries(TACTICS)) {
     const b = h("button", { class: `choice ${s.tactic === id ? "active" : ""}` }, h("b", {}, t.label), h("span", {}, t.description));
@@ -463,7 +524,7 @@ function squadView(s: SeasonState): HTMLElement {
       shapes,
     ),
     h("div", { class: "grid" },
-      card("Your tactic", tactics),
+      card("Your tactic", h("div", { class: "advice" }, `Attacking needs pace and handling. Your starting five averages ${skill} (62 is neutral, 72 is ideal), so ${fitText}. A poorly suited side that attacks makes errors and gets countered when it loses the ball.`), tactics),
       card("Training focus", h("div", { class: "hint" }, "After each matchday three players get a chance to improve in this area."), training)),
   );
 }
@@ -563,7 +624,7 @@ function render() {
   newBtn.onclick = newGameFlow;
   const helpBtn = h("button", {}, "How to play");
   helpBtn.onclick = showRules;
-  app.append(h("header", {}, h("h1", {}, "ARENA LEAGUE"), nav, h("span", { class: "spacer" }), h("span", { class: "dim" }, `${teamById(s, s.managedId).name} | ${s.gender === "women" ? "Women's" : "Men's"} League | Season ${s.season}`), watch, quick, helpBtn, newBtn));
+  app.append(h("header", {}, h("h1", {}, "ARENA LEAGUE"), nav, h("span", { class: "spacer" }), h("span", { class: "dim" }, `${teamById(s, s.managedId).name} | ${s.gender === "women" ? "Women's" : "Men's"} League | Season ${s.season} | ${fmtMoney(s.money)}`), watch, quick, helpBtn, newBtn));
 
   const body = h("main");
   if (tab === "overview") body.append(overviewView(s));

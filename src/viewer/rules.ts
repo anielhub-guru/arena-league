@@ -1,4 +1,5 @@
 import { h } from "../dom";
+import { MATCH_PAY, MAX_BUYS, PRIZES, SELL_RATE, TEEN_RATE, fmtMoney } from "../league/economy";
 import { BIN_PHASES, MAX_SUBS, PHASES, RED_BAN, TACTICS, SHAPES } from "../engine/match";
 
 /**
@@ -184,6 +185,7 @@ const SECTIONS: Section[] = [
         ["Tactic", "Plays like", "Cards"],
         (Object.values(TACTICS)).map((t) => [t.label, t.description.replace(/\s*(Fewer cards|Hard tackling means more cards|Slightly more cards)\.?$/, ""), `${t.card}x`]),
       ),
+      p(b("Attacking is strong, but only for the right side."), " Its bonus depends on the average pace and handling of your starting five: about 62 is neutral, 72 or more gets the full bonus (more metres, fewer errors), and 52 or less is reckless. A side that attacks without those tools makes more mistakes, and when it loses the ball the other side counters, hitting it while the attackers are out of shape. The Squad tab tells you how well your five suits it. AI clubs that cannot play Attacking fall back to Balanced."),
       h("h4", {}, "Defensive shape"),
       p("Tactic is how ambitious you are. Shape is how your defence stands, and it is how you cover a man down. You can see it on the pitch in highlights: the defensive line, how deep it stands and where the Sweeper is."),
       tbl(["Shape", "What it does"], Object.values(SHAPES).map((sh) => [sh.label, sh.description])),
@@ -228,6 +230,23 @@ const SECTIONS: Section[] = [
       p("After each matchday, three players from your squad have a chance to gain +1 on the rating you picked (Attack, Defence, Kicking or Fitness). Between seasons, young players grow and veterans fade."),
       h("h4", {}, "Player stats"),
       p("The Squad tab shows every player's season and career stats: appearances, points, tries, kicking, metres gained, tackles, line breaks, turnovers won and cards. Your club news names the standout player after each match. Stats are kept for every club, so you can scout rivals' stars as well."),
+    ],
+  },
+  {
+    id: "money",
+    title: "Careers, the offseason and money",
+    body: () => [
+      p("Every player has a hidden ", b("potential"), ": a ceiling on how good they can become. Players under 28 grow toward it, from 31 they fade (and their ceiling falls), and from 31 they can retire. Training can never lift a player past their potential."),
+      h("h4", {}, "The offseason"),
+      p("After matchday 14 and before the next season you have an offseason screen. Retirees leave, and you must refill your squad to eight with at least one natural player in each of the five positions. Beyond that, everything is optional."),
+      ul(
+        [b("Youth shortlist."), " Teenage prospects, three for each position that lost a player and one for the others. Their rating is real but their potential is a scouting estimate (1 to 5 stars) that can be about a star out. Sign any of them, replacing anyone you choose."],
+        [b("Selling."), " Sell any player who is not retiring. They go to another club and you get their sale price."],
+        [b("Transfer list."), ` Each other club lists one player, usually a veteran or a bench player rather than a star. The asking price follows what they are really worth, which includes the potential you cannot see, so a good judge finds bargains and a poor one finds traps. You can make up to ${MAX_BUYS} signings per offseason, and the selling club replaces the player with a youngster.`],
+      ),
+      h("h4", {}, "Money"),
+      p("Only your club keeps a balance; the AI clubs are balanced by design. Building a fortune is part of the game: money comes from match winnings (", `win ${fmtMoney(MATCH_PAY.win)}, draw ${fmtMoney(MATCH_PAY.draw)}, loss ${fmtMoney(MATCH_PAY.loss)}`, "), prize money for your final position (", `${fmtMoney(PRIZES[0])} for first down to ${fmtMoney(PRIZES[PRIZES.length - 1])} for eighth`, "), selling players, and selling the prospects you do not sign. It goes on a yearly wage bill, which grows with the quality of your squad, and on transfers. Money speeds up your rebuilding but cannot buy the league: only a few players are listed each year, you can sign at most a couple, and finding the ones who are really worth it is the skill. If your balance goes negative you can still play on, but you cannot buy anyone until you are back in credit."),
+      tip(`A player's value rises with ability and with young potential, and falls with age. Selling pays ${Math.round(SELL_RATE * 100)}% of value; an unsigned teenager fetches ${Math.round(TEEN_RATE * 100)}%.`),
     ],
   },
   {

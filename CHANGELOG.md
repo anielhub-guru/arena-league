@@ -4,6 +4,22 @@ Versions follow `MAJOR.MINOR.PATCH`. The version lives in `package.json` and is 
 `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` (a test fails if they
 drift apart). It is shown in the app footer and on the new-game screen.
 
+## 0.4.0
+
+- Attacking is now strong only for the right side. Its bonus scales with the pace and handling of your
+  starting five; a side without them makes more errors and is countered when it loses the ball. Before, it
+  won 55 to 70% of matches whatever the squad. Now (same overall rating, vs Balanced): about 40% when
+  unsuited, 53% neutral, 61 to 68% when well suited. The Squad tab shows how well your five suits it, and AI
+  clubs that cannot play it fall back to Balanced.
+- Offseason screen replaces the single prospect pick: sell any player, sign any prospect from the youth
+  shortlist (replacing anyone you choose, not just your oldest), and optionally buy from the transfer list.
+- Money: match winnings, prize money by finishing position, sales, and unpicked prospects sold; a wage bill
+  that grows with squad quality. Player value depends on ability, young potential and age. Only the manager's
+  club keeps a balance. Transfer listings favour veterans and bench players and are priced by true value,
+  while you only see a noisy potential estimate, so deals and traps are real. At most 2 signings a window.
+- Debt never blocks the season, it only stops you buying.
+- Saves are version 6; versions 3 to 5 are upgraded on load.
+
 ## 0.3.0
 
 - Player lifecycle: every player has a hidden potential. Youngsters grow toward it, veterans fade and

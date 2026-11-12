@@ -1,14 +1,15 @@
 import { hashSeed, Rng } from "../engine/rng";
-import { MatchSim, RED_BAN, SHAPE_BY_STYLE } from "../engine/match";
+import { MatchSim, RED_BAN, SHAPE_BY_STYLE, attackFit } from "../engine/match";
 import { STAT_KEYS, emptyTotals, ROLES, type Attr, type Gender, type MatchLog, type Player, type PlayerTotals, type Role, type ShapeId, type TacticId, type Team } from "../engine/types";
 import { describeLine, impact, playerOfTheMatch } from "./awards";
 import { buildSchedule, type Fixture } from "./schedule";
 import { computeStandings, standingsAt } from "./standings";
+import { MATCH_PAY, MAX_BUYS, MONEY_START, fmtMoney, playerValue, prizeFor, sellPrice, teenSalePrice, wageOf } from "./economy";
 import { evolvePlayers, generateTeams, initialPotential, makeProspects, overall } from "./teams";
 
 export { describeLine, impact };
 
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 
 export type TrainingFocus = "attack" | "defence" | "kicking" | "fitness";
 export const TRAINING: Record<TrainingFocus, { label: string; description: string; attrs: Attr[] }> = {
@@ -18,18 +19,30 @@ export const TRAINING: Record<TrainingFocus, { label: string; description: strin
   fitness: { label: "Fitness", description: "Stamina, so players stay fresh late on.", attrs: ["stamina"] },
 };
 
-/** One offseason decision: pick a prospect for a vacancy. */
-export interface IntakeSlot {
-  role: Role;
-  /** The squad member who retires (mandatory slot) or who you may replace (optional slot). */
-  outId: string;
-  optional: boolean;
-  /** Prospects to choose from, with true potential hidden behind `scouted`. */
-  options: Player[];
+/** A player an AI club has put up for sale. The asking price follows the player's true value, which you cannot see. */
+export interface Listing {
+  /** Snapshot with `scouted` set: potential is only an estimate until you sign them. */
+  player: Player;
+  clubId: string;
+  /** Asking price in thousands. */
+  price: number;
 }
 
+/** Everything the manager can do between seasons. Nothing here is compulsory except filling the squad back to eight. */
 export interface Intake {
-  slots: IntakeSlot[];
+  /** Squad members who retire when the offseason is confirmed. */
+  retiring: string[];
+  /** Teenage prospects: three for each position that lost a player, one for every other position. Unpicked ones are sold. */
+  prospects: Player[];
+  /** Players AI clubs have transfer-listed. */
+  market: Listing[];
+}
+
+/** The manager's choices: players to sell, prospects to sign, listed players to buy. */
+export interface OffseasonPlan {
+  sell: string[];
+  sign: string[];
+  buy: string[];
 }
 
 export interface SeasonRecord {
@@ -71,6 +84,8 @@ export interface SeasonState {
   seasonStats: Record<string, PlayerTotals>;
   /** Completed seasons, by player id. Add the current season for a full career line. */
   careerStats: Record<string, CareerTotals>;
+  /** The manager's bank balance in thousands of naira. */
+  money: number;
   /** Offseason decisions waiting on the manager. The new season cannot be played until resolved. */
   intake?: Intake;
 }
@@ -84,6 +99,7 @@ export function migrateSave(raw: SeasonState): SeasonState | null {
     for (const t of s.teams) for (const p of t.players) p.potential ??= initialPotential(p, new Rng(hashSeed(s.seed, p.id, "pot")));
     s.version = 5;
   }
+  if (s.version === 5) s = { ...s, version: 6, money: MONEY_START };
   if (s.version !== SAVE_VERSION) return null;
   return { ...s, shape: s.shape ?? "sweeper" };
 }
@@ -110,6 +126,7 @@ export function newGame(seed: number, managedId: string, gender: Gender = "men")
     news: [{ season: 1, matchday: 0, text: `Welcome to ${me.name}. Set your starting five, tactic and training focus, then play your first match.` }],
     seasonStats: {},
     careerStats: {},
+    money: MONEY_START,
   };
 }
 
@@ -125,6 +142,16 @@ export function managedFixture(s: SeasonState): Fixture | undefined {
   return s.fixtures.find((f) => f.matchday === s.matchday && (f.homeId === s.managedId || f.awayId === s.managedId));
 }
 
+/**
+ * AI clubs play their style, except that an attacking club whose lineup lacks the pace and handling
+ * for it falls back to balanced rather than throwing the ball about and getting countered.
+ */
+export function aiTactic(team: Team): TacticId {
+  if (team.style !== "attacking") return team.style;
+  const lineup = team.lineup.map((id) => team.players.find((p) => p.id === id)).filter((p): p is Player => !!p);
+  return attackFit(lineup) < -0.1 ? "balanced" : "attacking";
+}
+
 /** Builds a steppable simulation for a fixture, using the manager's tactic for their own club. */
 export function buildSim(s: SeasonState, f: Fixture, live = false): MatchSim {
   const home = teamById(s, f.homeId);
@@ -135,10 +162,10 @@ export function buildSim(s: SeasonState, f: Fixture, live = false): MatchSim {
     matchday: f.matchday,
     home,
     away,
-    homeTactic: home.id === s.managedId ? s.tactic : home.style,
-    awayTactic: away.id === s.managedId ? s.tactic : away.style,
-    homeShape: home.id === s.managedId ? s.shape : SHAPE_BY_STYLE[home.style],
-    awayShape: away.id === s.managedId ? s.shape : SHAPE_BY_STYLE[away.style],
+    homeTactic: home.id === s.managedId ? s.tactic : aiTactic(home),
+    awayTactic: away.id === s.managedId ? s.tactic : aiTactic(away),
+    homeShape: home.id === s.managedId ? s.shape : SHAPE_BY_STYLE[aiTactic(home)],
+    awayShape: away.id === s.managedId ? s.shape : SHAPE_BY_STYLE[aiTactic(away)],
     // AI clubs always adapt after a card; the manager decides themselves when watching live.
     homeAuto: !(live && home.id === s.managedId),
     awayAuto: !(live && away.id === s.managedId),
@@ -179,11 +206,13 @@ export function playMatchday(prev: SeasonState, managedLog?: MatchLog): { state:
     const [pf, pa] = home ? [mine.homeScore, mine.awayScore] : [mine.awayScore, mine.homeScore];
     const opp = home ? mine.awayName : mine.homeName;
     const verb = pf > pa ? "Won" : pf === pa ? "Drew" : "Lost";
+    const pay = pf > pa ? MATCH_PAY.win : pf === pa ? MATCH_PAY.draw : MATCH_PAY.loss;
+    state.money += pay;
     const after = computeStandings(ids, state.fixtures);
     const was = before.findIndex((r) => r.teamId === state.managedId) + 1;
     const now = after.findIndex((r) => r.teamId === state.managedId) + 1;
     const move = md === 1 ? `Now ${ord(now)}.` : now < was ? `Up to ${ord(now)}.` : now > was ? `Down to ${ord(now)}.` : `Holding ${ord(now)}.`;
-    news.push(`${verb} ${pf}-${pa} ${home ? "vs" : "at"} ${opp}. ${move}`);
+    news.push(`${verb} ${pf}-${pa} ${home ? "vs" : "at"} ${opp}. ${move} Match winnings ${fmtMoney(pay)}.`);
     if (now === 1 && was !== 1) news.push("You have gone top of the table.");
   }
   news.push(...recordPlayers(state, logs));
@@ -292,35 +321,65 @@ export function startNextSeason(prev: SeasonState): SeasonState {
     if (now.apps > 0) career.seasons++;
   }
   state.seasonStats = {};
+  const news: string[] = [];
+  // Season finances: prize money for the finishing position, less the wage bill.
+  const prize = prizeFor(finish);
+  const wages = teamById(state, state.managedId).players.reduce((t, p) => t + wageOf(p), 0);
+  state.money += prize - wages;
+  news.push(`Season ${state.season} finances: ${ord(finish)} place prize money ${fmtMoney(prize)}, wage bill ${fmtMoney(-wages)}. Balance ${fmtMoney(state.money)}.`);
   state.season++;
   const retirees = evolvePlayers(state.teams, hashSeed(state.seed, state.season));
-  const news: string[] = [`Season ${state.season} begins. Squads have aged and ratings have shifted.`];
+  news.push(`Season ${state.season} begins. Squads have aged and ratings have shifted.`);
   let n = 0;
+  const season = state.season;
   for (const team of state.teams) {
     const out = retirees.get(team.id) ?? [];
     if (team.id === state.managedId) {
-      const slots: IntakeSlot[] = out.map((r) => ({ role: r.role, outId: r.id, optional: false, options: makeProspects(team, `${state.season}.${n++}`, r.role, state.seed) }));
       for (const r of out) {
         r.retiring = true;
-        news.push(`${r.name} (${r.age}) retires. Choose a replacement.`);
+        news.push(`${r.name} (${r.age}) retires.`);
       }
-      const oldest = team.players.filter((p) => !p.retiring).sort((a, b) => b.age - a.age || a.id.localeCompare(b.id))[0];
-      if (oldest && oldest.age >= 28) slots.push({ role: oldest.role, outId: oldest.id, optional: true, options: makeProspects(team, `${state.season}.${n++}`, oldest.role, state.seed) });
-      if (slots.length) state.intake = { slots };
-    } else {
-      // AI clubs know their prospects' true potential and take the best one.
-      for (const r of out) {
-        const best = makeProspects(team, `${state.season}.${n++}`, r.role, state.seed).sort((a, b) => (b.potential ?? 0) - (a.potential ?? 0))[0];
-        replacePlayer(team, r.id, best);
-        delete state.careerStats[r.id];
-      }
+      continue;
+    }
+    // AI clubs know their prospects' true potential and take the best one.
+    for (const r of out) {
+      const best = makeProspects(team, `${season}.${n++}`, r.role, state.seed).sort((a, b) => (b.potential ?? 0) - (a.potential ?? 0))[0];
+      replacePlayer(team, r.id, best);
+      delete state.careerStats[r.id];
     }
   }
+  state.intake = buildIntake(state, managedRetirees(state, retirees));
   state.fixtures = buildSchedule(ids, state.season);
   state.matchday = 1;
-  if (state.intake) news.push("Your offseason decisions are on the Overview tab. The season starts once you confirm them.");
+  news.push("The offseason is open: fill your squad, and look at the youth shortlist and the transfer list. The season starts when you confirm.");
   state.news = [...news.map((text) => ({ season: state.season, matchday: 0, text })), ...state.news].slice(0, 14);
   return state;
+}
+
+const managedRetirees = (state: SeasonState, retirees: Map<string, Player[]>) => (retirees.get(state.managedId) ?? []).map((p) => p.id);
+
+/** Builds the manager's offseason options. Deterministic from the save seed, so reloading cannot reroll them. */
+function buildIntake(state: SeasonState, retiring: string[]): Intake {
+  const team = teamById(state, state.managedId);
+  const vacated = new Set(retiring.map((id) => team.players.find((p) => p.id === id)!.role));
+  const prospects = ROLES.flatMap((role) => makeProspects(team, `${state.season}.${role}`, role, state.seed, vacated.has(role) ? 3 : 1));
+
+  // Each AI club lists one player. Veterans and bench players are far likelier than stars,
+  // and the asking price is off the player's true value by a club's own guess, up or down.
+  const rng = new Rng(hashSeed(state.seed, state.season, "market"));
+  const market: Listing[] = [];
+  for (const club of state.teams) {
+    if (club.id === state.managedId) continue;
+    const pick = rng.weighted(club.players, (p) => {
+      const bench = club.lineup.includes(p.id) ? 0 : 0.8;
+      return (1 + Math.max(0, p.age - 28) * 0.8 + bench) / (1 + Math.max(0, overall(p) - 66) / 4);
+    });
+    const price = Math.max(50, Math.round((playerValue(pick) * (1.15 + 0.35 * rng.signed())) / 10) * 10);
+    const seen: Player = { ...structuredClone(pick), scouted: Math.max(30, Math.min(95, (pick.potential ?? overall(pick)) + rng.int(-6, 6))) };
+    delete seen.potential; // true potential stays hidden until signed
+    market.push({ player: seen, clubId: club.id, price });
+  }
+  return { retiring, prospects, market };
 }
 
 /** Put a new player in an old one's squad place and starting slot. */
@@ -331,36 +390,126 @@ function replacePlayer(team: Team, oldId: string, next: Player) {
   team.lineup = team.lineup.map((id) => (id === oldId ? next.id : id));
 }
 
-/** Sensible default picks: the best scouted prospect per slot, and only swap an optional slot if it is an upgrade. */
-export function autoPicks(s: SeasonState): Record<number, string | null> {
-  const picks: Record<number, string | null> = {};
-  const team = teamById(s, s.managedId);
-  (s.intake?.slots ?? []).forEach((slot, i) => {
-    const best = [...slot.options].sort((a, b) => (b.scouted ?? 0) - (a.scouted ?? 0))[0];
-    const out = team.players.find((p) => p.id === slot.outId);
-    picks[i] = slot.optional && (!out || (best.scouted ?? 0) <= (out.potential ?? 0) + 2) ? null : best.id;
-  });
-  return picks;
+export interface PlanCheck {
+  ok: boolean;
+  problems: string[];
+  /** Squad size after the plan. It must be eight. */
+  size: number;
+  sellIncome: number;
+  teenIncome: number;
+  buyCost: number;
+  moneyAfter: number;
 }
 
-/** Applies the manager's offseason choices. `picks[i]` is the chosen prospect id for slot i; optional slots may be null. */
-export function signProspects(prev: SeasonState, picks: Record<number, string | null>): SeasonState {
-  if (!prev.intake) throw new Error("Nothing to decide");
+/** Checks a plan without applying it. The offseason screen uses this to explain why Confirm is disabled. */
+export function checkPlan(s: SeasonState, plan: OffseasonPlan): PlanCheck {
+  const intake = s.intake;
+  if (!intake) throw new Error("Nothing to decide");
+  const team = teamById(s, s.managedId);
+  const retiring = new Set(intake.retiring);
+  const sell = new Set(plan.sell);
+  const problems: string[] = [];
+  const keep = team.players.filter((p) => !retiring.has(p.id) && !sell.has(p.id));
+  for (const id of sell) if (!team.players.some((p) => p.id === id && !retiring.has(id))) problems.push("You can only sell players who are in your squad.");
+  const signed = plan.sign.map((id) => intake.prospects.find((p) => p.id === id));
+  const bought = plan.buy.map((id) => intake.market.find((l) => l.player.id === id));
+  if (signed.some((x) => !x) || bought.some((x) => !x)) problems.push("Someone you chose is no longer on offer.");
+  const roster = [...keep, ...signed.filter((x): x is Player => !!x), ...bought.filter((x): x is Listing => !!x).map((l) => l.player)];
+  if (plan.buy.length > MAX_BUYS) problems.push(`You can make at most ${MAX_BUYS} transfer signings per offseason.`);
+  if (roster.length !== 8) problems.push(`Your squad must have 8 players (it would have ${roster.length}).`);
+  for (const role of ROLES) if (!roster.some((p) => p.role === role)) problems.push(`You need at least one natural ${role}.`);
+  const sellIncome = team.players.filter((p) => sell.has(p.id)).reduce((t, p) => t + sellPrice(p), 0);
+  const unsigned = intake.prospects.filter((p) => !plan.sign.includes(p.id));
+  const teenIncome = unsigned.reduce((t, p) => t + teenSalePrice(p), 0);
+  const buyCost = bought.reduce((t, l) => t + (l?.price ?? 0), 0);
+  const moneyAfter = s.money + sellIncome + teenIncome - buyCost;
+  // Debt never blocks the season (you can always refill the squad for free), it only stops you buying.
+  if (buyCost > 0 && moneyAfter < 0) problems.push(`You cannot afford this: the balance would be ${fmtMoney(moneyAfter)}.`);
+  return { ok: problems.length === 0, problems, size: roster.length, sellIncome, teenIncome, buyCost, moneyAfter };
+}
+
+/** A sensible default: the best scouted prospect for each retiree's position, no selling, no buying. */
+export function autoPlan(s: SeasonState): OffseasonPlan {
+  const plan: OffseasonPlan = { sell: [], sign: [], buy: [] };
+  if (!s.intake) return plan;
+  const team = teamById(s, s.managedId);
+  const taken = new Set<string>();
+  for (const id of s.intake.retiring) {
+    const role = team.players.find((p) => p.id === id)!.role;
+    const best = s.intake.prospects.filter((p) => p.role === role && !taken.has(p.id)).sort((a, b) => (b.scouted ?? 0) - (a.scouted ?? 0))[0];
+    if (best) {
+      taken.add(best.id);
+      plan.sign.push(best.id);
+    }
+  }
+  return plan;
+}
+
+/** Applies the manager's offseason plan. Throws (with the reason) if it is not valid. */
+export function completeOffseason(prev: SeasonState, plan: OffseasonPlan): SeasonState {
+  const check = checkPlan(prev, plan);
+  if (!check.ok) throw new Error(check.problems[0]);
   const state = structuredClone(prev);
+  const intake = state.intake!;
   const team = teamById(state, state.managedId);
   const news: string[] = [];
-  state.intake!.slots.forEach((slot, i) => {
-    const id = picks[i] ?? null;
-    if (!id) {
-      if (!slot.optional) throw new Error("Choose a replacement for every retiring player");
-      return;
+  const season = state.season;
+  const retiring = new Set(intake.retiring);
+  const sell = new Set(plan.sell);
+
+  // A club never drops a player it has just listed for someone else's sale.
+  const listed = new Set(intake.market.map((l) => l.player.id));
+  // Sold players go to an AI club, replacing their weakest player in that position if they are better.
+  for (const p of team.players.filter((x) => sell.has(x.id))) {
+    const price = sellPrice(p);
+    let target: { club: Team; weakest: Player } | null = null;
+    for (const club of state.teams) {
+      if (club.id === team.id) continue;
+      const weakest = club.players.filter((x) => x.role === p.role && !listed.has(x.id)).sort((a, b) => playerValue(a) - playerValue(b))[0];
+      if (weakest && (!target || playerValue(weakest) < playerValue(target.weakest))) target = { club, weakest };
     }
-    const prospect = slot.options.find((o) => o.id === id);
-    if (!prospect) throw new Error("That prospect is not on the shortlist");
-    const out = team.players.find((p) => p.id === slot.outId);
-    replacePlayer(team, slot.outId, prospect);
-    news.push(slot.optional ? `Signed ${prospect.name} (${prospect.role}, ${prospect.age}) to succeed ${out?.name ?? "a veteran"}.` : `Signed ${prospect.name} (${prospect.role}, ${prospect.age}) to replace ${out?.name ?? "a retiree"}.`);
+    news.push(`Sold ${p.name} (${p.role}, ${p.age}) to ${target?.club.name ?? "a club abroad"} for ${fmtMoney(price)}.`);
+    if (target && playerValue(p) > playerValue(target.weakest)) {
+      replacePlayer(target.club, target.weakest.id, structuredClone(p));
+      delete state.careerStats[target.weakest.id];
+    }
+  }
+
+  const joiners: Player[] = [];
+  for (const id of plan.sign) {
+    const p = intake.prospects.find((x) => x.id === id)!;
+    joiners.push(p);
+    news.push(`Signed prospect ${p.name} (${p.role}, ${p.age}).`);
+  }
+  let k = 0;
+  for (const id of plan.buy) {
+    const l = intake.market.find((x) => x.player.id === id)!;
+    const club = teamById(state, l.clubId);
+    const real = club.players.find((x) => x.id === id);
+    if (!real) throw new Error(`${l.player.name} is no longer available`);
+    // The selling club replaces them with a prospect, so the league keeps its numbers.
+    const youngster = makeProspects(club, `${season}.b${k++}`, real.role, state.seed, 1)[0];
+    replacePlayer(club, real.id, youngster);
+    joiners.push(real);
+    news.push(`Bought ${real.name} (${real.role}, ${real.age}) from ${club.name} for ${fmtMoney(l.price)}.`);
+  }
+  const unsigned = intake.prospects.filter((p) => !plan.sign.includes(p.id));
+  if (unsigned.length) news.push(`Sold ${unsigned.length} unpicked prospects for ${fmtMoney(check.teenIncome)}.`);
+
+  team.players = [...team.players.filter((p) => !retiring.has(p.id) && !sell.has(p.id)), ...joiners];
+  for (const p of team.players) {
+    delete p.retiring;
+    delete p.scouted;
+  }
+  // Keep the starting five legal: anyone who left is replaced by the best natural fit.
+  const used = new Set(team.lineup.filter((id) => team.players.some((p) => p.id === id)));
+  team.lineup = team.lineup.map((id, i) => {
+    if (team.players.some((p) => p.id === id)) return id;
+    const rep = bestReplacement(team, ROLES[i], used);
+    used.add(rep.id);
+    return rep.id;
   });
+  state.money = check.moneyAfter;
   delete state.intake;
   state.news = [...news.map((text) => ({ season: state.season, matchday: 0, text })), ...state.news].slice(0, 14);
   return state;
