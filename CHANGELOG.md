@@ -4,6 +4,32 @@ Versions follow `MAJOR.MINOR.PATCH`. The version lives in `package.json` and is 
 `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` (a test fails if they
 drift apart). It is shown in the app footer and on the new-game screen.
 
+## Unreleased
+
+- Matches are more draining (fatigue 0.65), so substitutions matter. Tiredness now carries between matches:
+  playing a lot builds it, resting clears it, and both scale with the player's stamina. Tired players start
+  weaker and tire faster; the Squad table shows a Weary/Tired tag. It resets each season.
+- AI clubs rest worn-out starters and make their own substitutions (at most two, never for your club). Each
+  club has its own coaching temperament, with some randomness every match.
+- Defensive shapes rebalanced: Sweeper back beats a quick Winger, Flat line beats power forwards, Narrow
+  edges a balanced attack.
+- Fixed a runner who had beaten the defence turning back to be tackled. A chased carrier's top speed now
+  fades gradually, he never steers backward into the tackle, and nobody can run off the end of the field.
+
+- The ball no longer spins in a player's hands. It now moves by what happened to it: passes spiral
+  (pointed, laces turning), long kicks tumble end over end, chips turn slowly, grubbers skip and wobble.
+- New grubber and chip and chase near the line (a chaser races a defender for the ball in-goal; a try,
+  a covered ball or a dead ball). Attacking sides try them most, Defensive least.
+- Attacking sides now string several passes together before the runner is released.
+- Tackles need real contact. The tackler now chases the carrier (faster than a runner with the ball) and the hit
+  only lands when the two touch, instead of firing on a timer. The carrier keeps running and shifts line until he
+  is hit, instead of stopping to wait for the tackle.
+- Passes before a try now vary with how close the line is. Within 12 m the player just takes it and goes
+  (or one short pass); within 25 m no long loops or chains; passing chains are 2 to 4 passes, not a fixed count.
+- AI clubs now train too, at a slower rate than you: about half a point a week for one player, up to the
+  player's potential, instead of none.
+- Try animation: the ball stays in the scorer's hands until it is grounded, so it no longer looks thrown.
+
 ## 0.5.0
 
 - League picker redesigned: pixel-art man and woman on the Men's / Women's league cards, left-aligned

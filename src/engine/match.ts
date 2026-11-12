@@ -1,5 +1,5 @@
 import { Narrator, type CardFacts, type Facts } from "./commentary";
-import { Rng } from "./rng";
+import { Rng, hashSeed } from "./rng";
 import { ROLES, emptyTotals } from "./types";
 import type { Attr, EventType, MatchEvent, MatchLog, Player, PlayerLine, Role, ShapeId, TacticId, Team, TeamStats } from "./types";
 
@@ -21,7 +21,39 @@ import type { Attr, EventType, MatchEvent, MatchLog, Player, PlayerLine, Role, S
  * manager change tactics, substitute and give a half-time talk mid-match.
  */
 export const PHASES = 80;
+/** How readily each tactic plays a grubber or a chip and chase near the line. */
+const KICK_AHEAD: Record<TacticId, number> = { attacking: 1.5, balanced: 1, defensive: 0.5, territory: 1.2 };
 export const MAX_SUBS = 3;
+/** How hard fatigue cuts stats by full time: a stamina-60 player loses 0.4 * FATIGUE (about 26%). */
+const FATIGUE = 0.65;
+/** Phases at which AI clubs consider a substitution (minutes 26 and 32), and how much better the swap must be. */
+const AI_SUB_PHASES = [52, 64];
+const AI_SUB_MARGIN = 1.22;
+
+/** An AI coach's habits: each club has a lasting temperament, and every match adds a little mood on top. */
+interface Coach {
+  /** Swap threshold: patient coaches wait for a bigger gain. */
+  margin: number;
+  /** Phases at which this coach looks at the bench. */
+  checks: number[];
+  rng: Rng;
+}
+function makeCoach(seed: number, clubId: string): Coach {
+  const club = new Rng(hashSeed("coach", clubId));
+  const mood = new Rng(hashSeed(seed, "coach-mood", clubId));
+  const offset = club.int(-5, 5) + mood.int(-3, 3);
+  return {
+    margin: AI_SUB_MARGIN + club.int(-5, 7) / 100 + mood.int(-3, 3) / 100,
+    checks: AI_SUB_PHASES.map((p) => p + offset),
+    rng: new Rng(hashSeed(seed, "coach-picks", clubId)),
+  };
+}
+/** Carried-over tiredness (Player.tired, 0-100) at its maximum: share of every stat lost at kickoff, and stamina points lost. */
+const TIRED_KICKOFF = 0.15;
+const TIRED_STAMINA = 30;
+const tiredOf = (p: Player) => clamp(p.tired ?? 0, 0, 100) / 100;
+/** Stamina for this match: tired legs from recent matches drain faster. */
+const stamNow = (p: Player) => p.stamina - tiredOf(p) * TIRED_STAMINA;
 export const OUT_OF_POSITION_PENALTY = 5;
 /** A sin bin lasts 10 minutes = 20 phases. */
 export const BIN_PHASES = 20;
@@ -97,8 +129,8 @@ export interface ShapeProfile {
  */
 export const SHAPES: Record<ShapeId, ShapeProfile> = {
   sweeper: { label: "Sweeper back", description: "Your Sweeper stays deep and covers the edges and line breaks. The best answer to a quick Winger. A little open to power runners through the middle.", mid: 0.3, wide: -1.2, brkMid: 0, brkWide: -0.01, cover: 1, manDown: 1, open: 0 },
-  flat: { label: "Flat line", description: "Your Sweeper steps into the line. Power runners gain far fewer metres, and it is the best cover when you are a man down against forwards. But nobody is left behind: a quick Winger or a line break usually means a try.", mid: -1.8, wide: 2, brkMid: -0.025, brkWide: 0.02, cover: 0.2, manDown: 0.75, open: 11 },
-  narrow: { label: "Narrow", description: "Defenders squeeze towards the middle, which hides a gap well. The best all-round choice against a balanced attack, but the wing is left open for a quick Winger.", mid: -1.1, wide: 3.6, brkMid: -0.015, brkWide: 0.07, cover: 0.9, manDown: 0.85, open: 0 },
+  flat: { label: "Flat line", description: "Your Sweeper steps into the line. Power runners gain far fewer metres, and it is the best cover when you are a man down against forwards. But nobody is left behind: a quick Winger or a line break usually means a try.", mid: -2.5, wide: 3.6, brkMid: -0.025, brkWide: 0.035, cover: 0.2, manDown: 0.8, open: 12},
+  narrow: { label: "Narrow", description: "Defenders squeeze towards the middle, which hides a gap well. The best all-round choice against a balanced attack, but the wing is left open for a quick Winger.", mid: -1.7, wide: 5.4, brkMid: -0.015, brkWide: 0.09, cover: 0.9, manDown: 0.85, open: 0},
 };
 
 /** The shape AI clubs use, following their style. */
@@ -132,6 +164,9 @@ export interface MatchInput {
   /** True when the game chooses the shape (AI clubs, and quick sim), including after a card. */
   homeAuto?: boolean;
   awayAuto?: boolean;
+  /** True when the game also makes this club's substitutions (AI clubs). Off for the manager and in plain tests. */
+  homeAiSubs?: boolean;
+  awayAiSubs?: boolean;
   seed: number;
 }
 
@@ -140,6 +175,7 @@ interface Info {
   variant?: string;
   ai?: number;
   di?: number;
+  ki?: number;
   side?: -1 | 1;
   pid?: string;
 }
@@ -157,12 +193,18 @@ interface Side {
   shape: ShapeId;
   /** The game picks this side's shape after a card instead of asking the manager. */
   auto: boolean;
+  /** The game makes substitutions for this side. */
+  aiSubs: boolean;
   score: number;
   stats: TeamStats;
   /** Five players in ROLES slot order (role = the slot they are playing). */
   field: Player[];
   bench: Player[];
   entered: Map<string, number>;
+  /** Phase at which a substituted player came off. */
+  left: Map<string, number>;
+  /** Everyone who has been on the pitch, for workload. */
+  played: Set<string>;
   subs: number;
   mod: { gain: number; error: number };
   /** Sin bin: player id to the phase at which they come back. */
@@ -219,7 +261,7 @@ const isBanned = (p: Player) => (p.ban ?? 0) > 0;
  * player from the squad (same natural role first, then the highest overall rating), so a
  * ban never has to be handled by the AI or the UI to keep a match valid.
  */
-function makeSide(team: Team, tactic: TacticId, shape: ShapeId, auto: boolean): Side {
+function makeSide(team: Team, tactic: TacticId, shape: ShapeId, auto: boolean, aiSubs = false): Side {
   const starters = ROLES.map((slot, i) => {
     const p = team.players.find((x) => x.id === team.lineup[i]);
     if (!p) throw new Error(`Lineup slot ${slot} of ${team.name} is empty`);
@@ -235,7 +277,7 @@ function makeSide(team: Team, tactic: TacticId, shape: ShapeId, auto: boolean): 
     }
     return slotPlayer(p, slot);
   });
-  const side: Side = { team, tactic, shape, auto, score: 0, stats: emptyStats(), field, bench: spare, entered: new Map(), subs: 0, mod: { gain: 0, error: 0 }, bin: new Map(), sentOff: new Set(), yellowCount: new Map(), lines: new Map() };
+  const side: Side = { team, tactic, shape, auto, aiSubs, score: 0, stats: emptyStats(), field, bench: spare, entered: new Map(), left: new Map(), played: new Set(field.map((p) => p.id)), subs: 0, mod: { gain: 0, error: 0 }, bin: new Map(), sentOff: new Set(), yellowCount: new Map(), lines: new Map() };
   return side;
 }
 
@@ -270,9 +312,10 @@ export class MatchSim {
     this.narrator = new Narrator(new Rng((input.seed ^ 0x9e3779b9) >>> 0));
     this.him = input.home.gender === "women" ? "her" : "him";
     this.sides = [
-      makeSide(input.home, input.homeTactic, input.homeShape ?? SHAPE_BY_STYLE[input.homeTactic], !!input.homeAuto),
-      makeSide(input.away, input.awayTactic, input.awayShape ?? SHAPE_BY_STYLE[input.awayTactic], !!input.awayAuto),
+      makeSide(input.home, input.homeTactic, input.homeShape ?? SHAPE_BY_STYLE[input.homeTactic], !!input.homeAuto, !!input.homeAiSubs),
+      makeSide(input.away, input.awayTactic, input.awayShape ?? SHAPE_BY_STYLE[input.awayTactic], !!input.awayAuto, !!input.awayAiSubs),
     ];
+    this.coaches = [makeCoach(input.seed, input.home.id), makeCoach(input.seed, input.away.id)];
     this.sides.forEach((s, i) => s.field.forEach((p) => this.line(s, i as 0 | 1, p)));
     this.emit("kickoff", `${input.home.name} get us under way against ${input.away.name}. The ball is in play at the Dominion Arena.`, true, 0);
   }
@@ -334,6 +377,8 @@ export class MatchSim {
     s.field[idx] = slotPlayer(incoming, out.role);
     s.bench.splice(bIdx, 1);
     s.entered.set(incoming.id, this.phase);
+    s.left.set(out.id, this.phase);
+    s.played.add(incoming.id);
     s.subs++;
     this.line(s, side, s.field[idx]);
     this.emit("sub", `${s.team.short} substitution: ${incoming.name} replaces ${out.name} at ${out.role}.`, false, side, incoming.name);
@@ -343,7 +388,7 @@ export class MatchSim {
   /** 0-100 freshness shown to the manager (the engine applies a milder version of the same curve). */
   energy(side: 0 | 1, p: Player): number {
     const played = this.phase - (this.sides[side].entered.get(p.id) ?? 0);
-    return Math.round(clamp(100 * (1 - (played / PHASES) * (1 - p.stamina / 100) * 1.5), 0, 100));
+    return Math.round(clamp(100 * (1 - tiredOf(p) * 0.3 - (played / PHASES) * (1 - stamNow(p) / 100) * 1.5), 0, 100));
   }
 
   /** Whether a player is in the sin bin (with minutes left) or sent off. */
@@ -362,6 +407,14 @@ export class MatchSim {
   toLog(): MatchLog {
     const [h, a] = this.sides;
     const i = this.input;
+    const load: Record<string, number> = {};
+    for (const s of this.sides) {
+      for (const id of s.played) {
+        const from = s.entered.get(id) ?? 0;
+        const to = s.left.get(id) ?? Math.min(this.phase, PHASES);
+        load[id] = clamp((to - from) / PHASES, 0, 1);
+      }
+    }
     const players = [...h.lines.values(), ...a.lines.values()].map((l) => ({ ...l, points: l.tries * 5 + l.conversions * 2 + l.penaltyGoals * 3 + l.dropGoals * 3 }));
     return {
       id: i.id,
@@ -380,6 +433,7 @@ export class MatchSim {
       events: this.events,
       stats: [h.stats, a.stats],
       players,
+      load,
     };
   }
 
@@ -421,7 +475,7 @@ export class MatchSim {
       side: info?.side,
       cast:
         info?.hl && this.cA && this.cD
-          ? { a: this.cA.field.map((p) => p.name), d: this.cD.field.map((p) => p.name), ai: info.ai ?? -1, di: info.di ?? -1, ta: this.cA.tactic, td: this.cD.tactic, sa: this.cA.shape, sd: this.cD.shape, ...(offA.length ? { offA } : {}), ...(offD.length ? { offD } : {}) }
+          ? { a: this.cA.field.map((p) => p.name), d: this.cD.field.map((p) => p.name), ai: info.ai ?? -1, di: info.di ?? -1, ...(info.ki !== undefined ? { ki: info.ki } : {}), ta: this.cA.tactic, td: this.cD.tactic, sa: this.cA.shape, sd: this.cD.shape, ...(offA.length ? { offA } : {}), ...(offD.length ? { offD } : {}) }
           : undefined,
       step: this.stepNo,
       minute: this.minute,
@@ -453,7 +507,7 @@ export class MatchSim {
 
   private eff(side: Side, p: Player, k: Attr): number {
     const played = this.phase - (side.entered.get(p.id) ?? 0);
-    return p[k] * (1 - (played / PHASES) * (1 - p.stamina / 100) * 0.45);
+    return p[k] * (1 - tiredOf(p) * TIRED_KICKOFF) * (1 - (played / PHASES) * (1 - stamNow(p) / 100) * FATIGUE);
   }
 
   private bestKicker(side: Side): Player {
@@ -479,8 +533,41 @@ export class MatchSim {
       this.tackles = 0;
       return;
     }
+    if (this.phase !== this.aiSubChecked) {
+      this.aiSubChecked = this.phase;
+      this.sides.forEach((s, i) => {
+        if (this.coaches[i].checks.includes(this.phase)) this.aiSubstitute(s, i as 0 | 1);
+      });
+    }
     this.playPhase();
     this.phase++;
+  }
+
+  private aiSubChecked = -1;
+  private coaches: [Coach, Coach];
+
+  /**
+   * AI clubs freshen tired legs: at a few checkpoints, swap the starter whose projected output over the
+   * rest of the match is worst for a bench player who would do better by a clear margin. Players with high
+   * stamina rarely need it. One change per checkpoint, and one substitution always held back.
+   */
+  private aiSubstitute(s: Side, idx: 0 | 1) {
+    if (!s.aiSubs || s.subs >= MAX_SUBS - 1 || s.bench.length === 0) return;
+    const coach = this.coaches[idx];
+    // Sometimes a coach just leaves it, and every call is a bit of a judgement.
+    if (coach.rng.chance(0.12)) return;
+    const span = PHASES - this.phase;
+    const proj = (p: Player, played: number) => ovr(p) * (1 - tiredOf(p) * TIRED_KICKOFF) * (1 - ((played + span / 2) / PHASES) * (1 - stamNow(p) / 100) * FATIGUE);
+    let best: { out: Player; inn: Player; gain: number } | null = null;
+    for (const out of s.field) {
+      if (this.isOff(s, out)) continue;
+      const now = proj(out, this.phase - (s.entered.get(out.id) ?? 0));
+      for (const inn of s.bench) {
+        const gain = (proj(slotPlayer(inn, out.role), 0) / now) * (1 + coach.rng.int(-4, 4) / 100);
+        if (gain > coach.margin && (!best || gain > best.gain)) best = { out, inn, gain };
+      }
+    }
+    if (best) this.substitute(idx, best.out.id, best.inn.id);
   }
 
   /** Sin-binned players whose ten minutes are up rejoin before the next phase is played. */
@@ -510,7 +597,7 @@ export class MatchSim {
     const idx: 0 | 1 = D === this.sides[0] ? 0 : 1;
     if (this.isOff(D, culprit) || this.avail(D).length <= MIN_ON_PITCH) return;
     const played = this.phase - (D.entered.get(culprit.id) ?? 0);
-    const risk = TACTICS[D.tactic].card * (1 + (played / PHASES) * (1 - culprit.stamina / 100) * 1.5);
+    const risk = TACTICS[D.tactic].card * (1 + (played / PHASES) * (1 - stamNow(culprit) / 100) * 1.5);
     const redP = clamp((high ? 0.09 : 0.012) * risk, 0, 0.5);
     const yellowP = clamp((high ? 0.3 : 0.16) * risk, 0, 0.9);
     const roll = rng.next();
@@ -575,6 +662,61 @@ export class MatchSim {
     this.maybeCard(D, culprit, high);
   }
 
+  /** The conversion kick after a try. */
+  private convert(A: Side, D: Side, att: 0 | 1) {
+    const rng = this.rng;
+    const eA = (p: Player, k: Attr) => this.eff(A, p, k);
+    const k = this.bestKicker(A);
+    const side: -1 | 1 = rng.chance(0.5) ? -1 : 1;
+    const score = `${this.input.home.short} ${this.sides[0].score} - ${this.sides[1].score} ${this.input.away.short}.`;
+    const kf = this.facts(A, D, { k: k.name, dist: 12, side: sideName(side), what: "conversion" });
+    if (rng.chance(clamp(0.5 + eA(k, "kicking") / 220, 0.4, 0.92))) {
+      const postIn = rng.chance(0.12);
+      A.score += 2;
+      A.stats.conversions++;
+      this.lineOf(A, k).conversions++;
+      const text = this.narrator.conversion(kf, `${this.input.home.short} ${this.sides[0].score} - ${this.sides[1].score} ${this.input.away.short}.`, postIn);
+      this.emit("conversion", text, true, att, k.name, undefined, { hl: true, variant: postIn ? "post-in" : "good", ai: A.field.indexOf(k), side });
+    } else {
+      const kindMiss = rng.pick(MISSES);
+      this.emit("conversion-miss", this.narrator.conversionMiss(kf, score, kindMiss), true, att, k.name, undefined, { hl: true, variant: kindMiss, ai: A.field.indexOf(k), side });
+    }
+  }
+
+  /**
+   * A grubber (low, rolling kick through the line) or a chip over the top, then a chase for the
+   * ball in-goal. The attacker wins the race for a try only some of the time.
+   */
+  private kickAhead(A: Side, D: Side, att: 0 | 1, aOn: Player[], dOn: Player[]): boolean {
+    const rng = this.rng;
+    const eA = (p: Player, k: Attr) => this.eff(A, p, k);
+    const eD = (p: Player, k: Attr) => this.eff(D, p, k);
+    const k = this.bestKicker(A);
+    const chasers = aOn.filter((p) => p !== k);
+    if (!chasers.length || !dOn.length) return false;
+    const chaser = rng.weighted(chasers, (p) => eA(p, "pace") + 0.5 * eA(p, "handling"));
+    const defender = rng.weighted(dOn, (p) => eD(p, "pace") + (p.role === "Sweeper" ? 25 : 0));
+    const kind: "grubber" | "chip" = rng.chance(0.5) ? "grubber" : "chip";
+    const pWin = clamp(0.4 + (eA(chaser, "pace") - eD(defender, "pace")) / 160 + (eA(k, "kicking") - 65) / 300 + (kind === "chip" ? (eA(chaser, "handling") - eD(defender, "handling")) / 300 : 0), 0.12, 0.65);
+    A.stats.kicks++;
+    const names = { k: k.name, c: chaser.name, t: defender.name, ts: surname(defender) };
+    const info = { hl: true, ai: A.field.indexOf(chaser), ki: A.field.indexOf(k), di: D.field.indexOf(defender) };
+    if (rng.chance(pWin)) {
+      this.pos = 100;
+      A.score += 5;
+      A.stats.tries++;
+      this.lineOf(A, chaser).tries++;
+      this.emit("try", this.narrator.try(this.facts(A, D, names), kind, A.score, D.score, this.minute), true, att, chaser.name, undefined, { ...info, variant: kind });
+      this.convert(A, D, att);
+      this.give(35);
+    } else {
+      const dead = rng.chance(0.3);
+      this.emit("kick", this.narrator.kickAheadLost(kind, dead, this.facts(A, D, names)), true, att, k.name, absX(att, 100), { ...info, variant: `${kind}-${dead ? "dead" : "lost"}` });
+      this.give(22);
+    }
+    return true;
+  }
+
   private playPhase() {
     const rng = this.rng;
     const att = this.att;
@@ -630,6 +772,9 @@ export class MatchSim {
       }
       return;
     }
+
+    // --- Grubber or chip and chase, close to the line ---------------------------
+    if (pos >= 80 && pos < 97 && rng.chance(0.05 * KICK_AHEAD[A.tactic]) && this.kickAhead(A, D, att, aOn, dOn)) return;
 
     // --- Kick for territory -------------------------------------------------
     const kickMult = pos < 40 ? 1.5 : pos < 70 ? 0.8 : 0.2;
@@ -725,21 +870,7 @@ export class MatchSim {
       }
       const kind = broke ? "break" : "power";
       this.emit("try", this.narrator.try(this.facts(A, D, names), kind, A.score, D.score, this.minute), true, att, carrier.name, undefined, { hl: true, variant: kind, ai: A.field.indexOf(carrier), di: D.field.indexOf(tackler) });
-      const k = this.bestKicker(A);
-      const side: -1 | 1 = rng.chance(0.5) ? -1 : 1;
-      const score = `${this.input.home.short} ${this.sides[0].score} - ${this.sides[1].score} ${this.input.away.short}.`;
-      const kf = this.facts(A, D, { k: k.name, dist: 12, side: sideName(side), what: "conversion" });
-      if (rng.chance(clamp(0.5 + eA(k, "kicking") / 220, 0.4, 0.92))) {
-        const postIn = rng.chance(0.12);
-        A.score += 2;
-        A.stats.conversions++;
-        this.lineOf(A, k).conversions++;
-        const text = this.narrator.conversion(kf, `${this.input.home.short} ${this.sides[0].score} - ${this.sides[1].score} ${this.input.away.short}.`, postIn);
-        this.emit("conversion", text, true, att, k.name, undefined, { hl: true, variant: postIn ? "post-in" : "good", ai: A.field.indexOf(k), side });
-      } else {
-        const kindMiss = rng.pick(MISSES);
-        this.emit("conversion-miss", this.narrator.conversionMiss(kf, score, kindMiss), true, att, k.name, undefined, { hl: true, variant: kindMiss, ai: A.field.indexOf(k), side });
-      }
+      this.convert(A, D, att);
       this.give(35);
       return;
     }

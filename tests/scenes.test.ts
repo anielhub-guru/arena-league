@@ -48,7 +48,7 @@ describe("highlight scenes", () => {
     }
     console.table([...seen.entries()].map(([k, v]) => ({ kind: k, count: v.n, minSec: +(v.min / 1000).toFixed(1), maxSec: +(v.max / 1000).toFixed(1) })));
     for (const [k, v] of seen) {
-      expect(v.min, k).toBeGreaterThan(2500);
+      expect(v.min, k).toBeGreaterThan(1800); // a play right by the line is short
       expect(v.max, k).toBeLessThan(15000);
     }
     for (const t of ["try:break", "try:power", "break:covered", "break:caught", "break:touch", "break:foul", "turnover", "intercept", "kick:live", "conversion:good", "conversion:post-in", "conversion-miss:post", "conversion-miss:wide", "conversion-miss:short", "penalty-goal:good"]) expect(seen.has(t), t).toBe(true);

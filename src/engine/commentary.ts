@@ -180,6 +180,33 @@ const TRY_POWER: Bank = [
   (f) => `TRY! Too strong for ${f.ts}: ${f.c} bulldozes over for ${f.team}!`,
 ];
 
+const TRY_GRUBBER: Bank = [
+  (f) => `TRY! ${f.k} pokes a grubber through the line, ${f.c} races onto it and dives on it before ${f.t} can! ${f.team} score!`,
+  (f) => `TRY! A clever grubber kick from ${f.k} bobbles over the line, and ${f.c} wins the race to touch it down. ${f.team} are over!`,
+  (f) => `TRY! ${f.k} rolls a grubber behind the defence, ${f.c} chases it down and grounds it ahead of ${f.t}. ${f.team} score!`,
+];
+const TRY_CHIP: Bank = [
+  (f) => `TRY! ${f.k} chips it over the top, ${f.c} chases, gathers on the bounce and dives over. ${f.team} are in!`,
+  (f) => `TRY! Chip and chase! ${f.k} lofts it over the rush, and ${f.c} beats ${f.t} to it and grounds it for ${f.team}!`,
+  (f) => `TRY! ${f.k} puts a delicate chip in behind, ${f.c} outpaces ${f.t}, collects it and scores. ${f.team} score!`,
+];
+const GRUBBER_LOST: Bank = [
+  (f) => `${f.k} rolls a grubber in behind, but ${f.t} gets back and covers it. ${f.opp} restart with a drop-out.`,
+  (f) => `Grubber kick from ${f.k}. ${f.c} chases hard, but ${f.t} is there first and dots it down. Drop-out for ${f.opp}.`,
+];
+const GRUBBER_DEAD: Bank = [
+  (f) => `${f.k} pokes a grubber through, but it bounces away and runs dead. ${f.opp} drop out from their 22.`,
+  (f) => `The grubber from ${f.k} is just too firm, and it skids over the dead-ball line. Drop-out for ${f.opp}.`,
+];
+const CHIP_LOST: Bank = [
+  (f) => `${f.k} chips it over the top, but ${f.t} reads it and gathers it safely. ${f.opp} drop out from the 22.`,
+  (f) => `Chip and chase from ${f.k}, but ${f.c} cannot get there: ${f.t} takes it first. Drop-out for ${f.opp}.`,
+];
+const CHIP_DEAD: Bank = [
+  (f) => `${f.k} chips it a touch too far and it sails over the dead-ball line. Drop-out for ${f.opp}.`,
+  (f) => `The chip from ${f.k} is overhit, and ${f.c} watches it run dead. ${f.opp} restart from their 22.`,
+];
+
 const YELLOW_REASON_BREAKDOWN = ["repeated infringements at the breakdown", "a cynical professional foul", "deliberately slowing the ball down"];
 const YELLOW_REASON_HIGH = ["a high tackle", "a reckless tackle around the neck"];
 const RED_REASON_HIGH = ["a dangerous high tackle", "serious foul play"];
@@ -224,6 +251,8 @@ export class Narrator {
   intercept = (f: Facts) => this.say("intercept", INTERCEPT, f);
   kickDead = (f: Facts) => this.say("kick-dead", KICK_DEAD, f);
   kickLive = (f: Facts) => this.say("kick-live", KICK_LIVE, f);
+  kickAheadLost = (kind: "grubber" | "chip", dead: boolean, f: Facts) =>
+    this.say(`${kind}-${dead ? "dead" : "lost"}`, kind === "grubber" ? (dead ? GRUBBER_DEAD : GRUBBER_LOST) : dead ? CHIP_DEAD : CHIP_LOST, f);
   penaltyCorner = (f: Facts) => this.say("pen-corner", PENALTY_CORNER, f);
 
   penaltyGoal(f: Facts, high: boolean, postIn: boolean): string {
@@ -252,8 +281,9 @@ export class Narrator {
   }
 
   /** A try, with how it changes the scoreboard. `a` and `d` are the scores after the try, before the conversion. */
-  try(f: Facts, kind: "break" | "power", a: number, d: number, minute: number): string {
-    const base = this.say(`try-${kind}`, kind === "break" ? TRY_BREAK : TRY_POWER, f);
+  try(f: Facts, kind: "break" | "power" | "grubber" | "chip", a: number, d: number, minute: number): string {
+    const banks = { break: TRY_BREAK, power: TRY_POWER, grubber: TRY_GRUBBER, chip: TRY_CHIP };
+    const base = this.say(`try-${kind}`, banks[kind], f);
     const before = a - 5;
     let extra = "";
     if (a === d) extra = "That levels the scores.";

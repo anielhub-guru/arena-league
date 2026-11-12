@@ -18,10 +18,16 @@ export interface Pt {
   x: number;
   y: number;
 }
+/**
+ * How a ball in flight moves, so a pass and a kick look different. Passes always spiral (long axis
+ * along the flight, laces turning). "punt" tumbles end over end, "chip" turns slowly over a short
+ * high arc, "grubber" skips and wobbles along the ground, "loose" is a ball nobody is controlling.
+ */
+export type BallStyle = "punt" | "chip" | "grubber" | "loose";
 export type Ball =
   | { k: "held"; by: string }
   | { k: "pass"; from: string; to: string; arc?: number }
-  | { k: "fly"; from: string | Pt; to: Pt; arc: number }
+  | { k: "fly"; from: string | Pt; to: Pt; arc: number; style?: BallStyle }
   | { k: "at"; p: Pt };
 export interface Banner {
   text: string;
@@ -247,11 +253,51 @@ function setPlay(c: Ctx, x0: number): PlayResult {
   const { sb, r, ai } = c;
   const a = A(ai);
   const roll = r(21);
-  let kind: "crash" | "dummy" | "loop" | "switch" | "skip";
-  if (ai === 3) kind = roll < 0.5 ? "skip" : "loop";
+  let kind: "crash" | "dummy" | "loop" | "switch" | "skip" | "chain" | "direct";
+  // A side set up to attack moves the ball through many hands before it commits to a runner.
+  const chainP = STYLE.ta === "attacking" ? 0.6 : STYLE.ta === "balanced" ? 0.1 : 0;
+  if (r(23) < chainP) kind = "chain";
+  else if (ai === 3) kind = roll < 0.5 ? "skip" : "loop";
   else if (ai === 2) kind = "dummy";
   else kind = roll < 0.4 ? "crash" : roll < 0.75 ? "dummy" : "switch";
+  // The nearer the line, the fewer passes: there is no law that says the ball must go through hands first.
+  const toGo = 100 - x0;
+  if (toGo < 12) kind = ai === 2 ? "direct" : "crash";
+  else if (toGo < 25 && (kind === "chain" || kind === "loop" || kind === "switch")) kind = ai === 2 ? "dummy" : "crash";
   let bx = x0;
+
+  if (kind === "direct") {
+    // Right by the line: the player simply takes it and goes, no pass.
+    sb.go(600, (p) => { formation(p, bx, 0.5, 2); line(p, bx, 0.5, 6); }, { k: "held", by: A(2) }, { cap: "So close to the line there is no need to pass: the Pivot takes it himself" });
+    bx += 1;
+    return { bx, by: 0.5, name: "Direct" };
+  }
+
+  if (kind === "chain") {
+    // Pivot -> hands -> hands -> hands -> runner, the defence sliding to follow the ball.
+    const others = [0, 1, 3, 4].filter((i) => i !== ai);
+    const order = [2];
+    const n = 1 + Math.floor(r(24) * 3); // one to three middle men before the final pass, never a fixed number
+    let pool = others.slice();
+    while (order.length <= n && pool.length) {
+      const i = pool.splice(Math.floor(r(25 + order.length) * pool.length), 1)[0];
+      order.push(i);
+    }
+    order.push(ai);
+    sb.go(650, (p) => { formation(p, bx, 0.5, 2); line(p, bx, 0.5, 8); }, { k: "held", by: A(2) }, { cap: "Attacking shape: the ball goes through many hands before anyone runs" });
+    for (let s = 1; s < order.length; s++) {
+      const from = order[s - 1];
+      const to = order[s];
+      bx += 1.8;
+      const y = to === ai ? LANE_A[ai] : clamp(LANE_A[to] + (s % 2 ? 0.06 : -0.06), 0.12, 0.88);
+      sb.go(480, (p) => {
+        formation(p, bx, y, to);
+        p[A(from)] = { x: bx - 1.2, y: lerp(p[A(from)].y, y, 0.5) };
+        line(p, bx, y, 6.5 - s * 0.3, s >= 2 ? { i: nearestDef(y), toY: y } : undefined);
+      }, { k: "pass", from: A(from), to: A(to), arc: 6 }, { cap: s === order.length - 1 ? "Final pass: the ball is in the hands of the runner with the defence stretched" : ["Quick hands: pass one", "Pass two: the defence slides across", "Pass three: players run lines off the ball"][s - 1] });
+    }
+    return { bx, by: LANE_A[ai], name: "Passing chain" };
+  }
 
   if (kind === "crash") {
     const y = LANE_A[ai];
@@ -377,7 +423,7 @@ function trySceneEnd(c: Ctx, cid: string, did: string, ty: number) {
         if (id !== cid) p[id] = { x: Math.min(p[id].x + 3, 97), y: p[id].y };
       }
     },
-    { k: "at", p: { x: 102.6, y: ty } },
+    { k: "held", by: cid },
     { banner: { text: "TRY!", color: WHITE, sub: ev.player }, fx: { kind: "flash", at: { x: 101, y: ty } }, cap: "Dives over the line and grounds the ball" },
   );
   sb.go(
@@ -394,6 +440,60 @@ function trySceneEnd(c: Ctx, cid: string, did: string, ty: number) {
     },
     { k: "at", p: { x: 102.6, y: ty } },
   );
+}
+
+
+/**
+ * Grubber (a low kick that skips and rolls along the ground) or chip (a short, high kick over the
+ * rushing defence), then a chase for the ball in-goal. The caption and banner say which one it is.
+ */
+function kickAheadScene(c: Ctx, x0: number, ki: number, kind: "grubber" | "chip", outcome: "try" | "lost" | "dead") {
+  const { sb, ev, r, ai, di, names } = c;
+  const cid = A(ai);
+  const did = D(di);
+  const kid = A(ki);
+  const ty = outcome === "try" ? tryLane(ev) : 0.3 + r(31) * 0.4;
+  const bx = x0;
+  const label = kind === "grubber" ? "GRUBBER!" : "CHIP & CHASE!";
+  if (ki !== 2) {
+    sb.go(520, (q) => {
+      formation(q, bx, LANE_A[ki], ki);
+      line(q, bx, 0.5, 8);
+    }, { k: "pass", from: A(2), to: kid, arc: 6 }, { cap: "Pass to the kicker" });
+  }
+  sb.go(700, (q) => {
+    formation(q, bx, LANE_A[ki], ki);
+    q[cid] = { x: bx + 1.5, y: clamp(ty + (ty > 0.5 ? -0.14 : 0.14), 0.1, 0.9) };
+    line(q, bx, 0.5, 4);
+  }, { k: "held", by: kid }, {
+    cap: kind === "grubber" ? "The defence rushes up. The kicker will poke the ball low through the gap." : "The defence rushes up flat. The kicker spots the space over the top.",
+  });
+  const landX = outcome === "dead" ? 103.5 : 102;
+  const ms = clamp(600 + (landX - bx) * MS_PER_M, 1200, 2800);
+  sb.go(ms, (q) => {
+    q[kid] = { x: bx + 1, y: q[kid].y };
+    q[cid] = { x: outcome === "try" ? landX - 0.8 : landX - 2.4, y: ty };
+    q[did] = { x: outcome === "try" ? landX - 3.5 : landX - 0.8, y: clamp(ty + (outcome === "try" ? 0.07 : 0.02), 0.1, 0.9) };
+    for (let i = 0; i < 5; i++) if (D(i) !== did) q[D(i)] = { x: bx + 5 + i * 0.4, y: LANE_D[i] };
+    for (let i = 0; i < 5; i++) if (A(i) !== cid && A(i) !== kid) q[A(i)] = { x: bx + 3 + i, y: q[A(i)].y };
+  }, { k: "fly", from: kid, to: { x: landX, y: ty }, arc: kind === "grubber" ? 8 : 42, style: kind }, {
+    banner: { text: label, color: GREEN, sub: surname(names.a[ki]) },
+    cap: kind === "grubber" ? "Grubber: a low kick that skips and rolls along the ground, in behind the defence" : "Chip and chase: a short, high kick over the defence, then the chaser sprints after it",
+    fx: { kind: "kick", at: kid },
+  });
+  if (outcome === "dead") {
+    sb.go(900, () => {}, { k: "fly", from: { x: landX, y: ty }, to: { x: 106, y: ty }, arc: 6, style: "loose" }, { banner: { text: "DEAD BALL", color: AMBER }, cap: "Too firm: it runs over the dead-ball line. Drop-out for the defence." });
+  } else if (outcome === "lost") {
+    sb.go(750, (q) => {
+      q[did] = { x: landX - 0.4, y: ty };
+    }, { k: "held", by: did }, { hits: [{ kind: "miss", runner: cid, other: did, at: 0.4 }], banner: { text: "COVERED!", color: AMBER, sub: surname(names.d[di]) }, cap: "The defender gets there first and grounds it. Drop-out." });
+    sb.go(800, () => {}, { k: "held", by: did });
+  } else {
+    sb.go(750, (q) => {
+      q[cid] = { x: 101.2, y: ty };
+    }, { k: "held", by: cid }, { hits: [{ kind: "miss", runner: cid, other: did, at: 0.5 }], cap: kind === "grubber" ? "The chaser wins the race and dives on the bouncing ball" : "The chaser beats the defender and gathers it on the bounce" });
+    trySceneEnd(c, cid, did, ty);
+  }
 }
 
 /**
@@ -482,7 +582,12 @@ function buildFullScene(ev: MatchEvent): Scene | null {
   let initBall: Ball = { k: "held", by: A(2) };
   const type = ev.type;
 
-  if (type === "try") {
+  if ((type === "try" || type === "kick") && (ev.variant?.startsWith("grubber") || ev.variant?.startsWith("chip"))) {
+    const kind = ev.variant.startsWith("grubber") ? "grubber" : "chip";
+    const outcome = type === "try" ? "try" : ev.variant.endsWith("dead") ? "dead" : "lost";
+    kickAheadScene(c, x0, ev.cast.ki ?? 2, kind, outcome);
+    initBall = { k: "held", by: A(2) };
+  } else if (type === "try") {
     const ty = tryLane(ev);
     const p = setPlay(c, x0);
     if (ev.variant === "break") {
@@ -515,7 +620,7 @@ function buildFullScene(ev: MatchEvent): Scene | null {
         q[A(ai)] = { x: end, y: 0.95 };
         q[did] = { x: end + 0.4, y: 0.86 };
       }, { k: "held", by: cid }, { cap: "Forced out towards the touchline", hits: [{ kind: "tackle", runner: cid, other: did, result: "driven", at: 0.4 }] });
-      sb.go(700, () => {}, { k: "fly", from: cid, to: { x: end + 2, y: 1.12 }, arc: 16 }, { banner: { text: "OUT OF PLAY!", color: AMBER, sub: "Line-out to the defence" }, cap: "The ball crosses the touchline. Possession switches." });
+      sb.go(700, () => {}, { k: "fly", from: cid, to: { x: end + 2, y: 1.12 }, arc: 16, style: "loose" }, { banner: { text: "OUT OF PLAY!", color: AMBER, sub: "Line-out to the defence" }, cap: "The ball crosses the touchline. Possession switches." });
       sb.go(1100, (q) => {
         const sideY = 0.93;
         q[D(2)] = { x: end + 0.5, y: 1.0 };
@@ -564,7 +669,7 @@ function buildFullScene(ev: MatchEvent): Scene | null {
     }, { k: "held", by: cid }, { hits: [{ kind: "tackle", runner: cid, other: did, result: "down", at: 0.3 }], cap: "Wrapped up and put on the floor" });
     sb.go(800, (q) => {
       q[did] = { x: end + 1.4, y: p.by };
-    }, { k: "fly", from: cid, to: { x: end + 1.4, y: p.by }, arc: 12 }, { banner: { text: "TURNOVER!", color: AMBER, sub: ev.player }, cap: "Jackal! The tackler gets over the ball and rips it free" });
+    }, { k: "fly", from: cid, to: { x: end + 1.4, y: p.by }, arc: 12, style: "loose" }, { banner: { text: "TURNOVER!", color: AMBER, sub: ev.player }, cap: "Jackal! The tackler gets over the ball and rips it free" });
     sb.go(900, (q) => {
       q[did] = { x: end - 2, y: p.by + 0.1 };
       for (let i = 0; i < 5; i++) if (D(i) !== did) q[D(i)] = { x: end - 1 + i * 0.8, y: LANE_D[i] };
@@ -574,7 +679,7 @@ function buildFullScene(ev: MatchEvent): Scene | null {
     const ball = { x: p.bx + 4, y: clamp(p.by + (r(4) - 0.5) * 0.2, 0.15, 0.85) };
     sb.go(700, (q) => {
       q[did] = { x: p.bx + 5, y: p.by };
-    }, { k: "fly", from: cid, to: ball, arc: 14 }, { banner: { text: "KNOCK-ON!", color: RED, sub: ev.player }, cap: "It slips out of the carrier's hands and goes forward" });
+    }, { k: "fly", from: cid, to: ball, arc: 14, style: "loose" }, { banner: { text: "KNOCK-ON!", color: RED, sub: ev.player }, cap: "It slips out of the carrier's hands and goes forward" });
     sb.go(750, (q) => {
       q[did] = { ...ball };
     }, { k: "held", by: did }, { cap: "The defence scoops it up" });
@@ -630,9 +735,9 @@ function buildFullScene(ev: MatchEvent): Scene | null {
       q[A(0)] = { x: land.x - 12, y: 0.4 };
       for (let i = 0; i < 4; i++) q[D(i)] = { x: land.x - 18 + i * 2, y: LANE_D[i] };
       q[D(4)] = { x: Math.min(land.x, 97), y: 0.5 };
-    }, { k: "fly", from: kid, to: land, arc: 80 }, { banner: dead ? undefined : { text: "KICK!", color: GREEN, sub: ev.player }, cap: dead ? "Too long. It is going to run dead." : "A towering kick for territory" });
+    }, { k: "fly", from: kid, to: land, arc: 80, style: "punt" }, { banner: dead ? undefined : { text: "KICK!", color: GREEN, sub: ev.player }, cap: dead ? "Too long. It is going to run dead." : "A towering kick for territory" });
     if (dead) {
-      sb.go(900, () => {}, { k: "fly", from: land, to: { x: 106, y: 0.5 }, arc: 10 }, { banner: { text: "DEAD BALL", color: AMBER }, cap: "Over the dead-ball line. Drop-out for the defence." });
+      sb.go(900, () => {}, { k: "fly", from: land, to: { x: 106, y: 0.5 }, arc: 10, style: "loose" }, { banner: { text: "DEAD BALL", color: AMBER }, cap: "Over the dead-ball line. Drop-out for the defence." });
     } else {
       sb.go(850, () => {}, { k: "held", by: D(4) }, { banner: { text: "CAUGHT", color: AMBER, sub: surname(names.d[4]) }, cap: "The Sweeper gathers it under pressure" });
       sb.go(1000, (q) => {
@@ -714,7 +819,7 @@ function buildFullScene(ev: MatchEvent): Scene | null {
       wide: { text: `WIDE ${side < 0 ? "LEFT" : "RIGHT"}!`, color: RED, sub: ev.player },
       short: { text: "SHORT!", color: RED, sub: ev.player },
     };
-    s2.go(flightMs, (q) => { q[kid] = { x: spot.x + 0.9, y: spot.y }; }, { k: "fly", from: isDrop ? kid : spot, to: target, arc: (variant === "short" ? 50 : 76) * lift }, { cap: "Struck cleanly...", fx: { kind: "kick", at: kid } });
+    s2.go(flightMs, (q) => { q[kid] = { x: spot.x + 0.9, y: spot.y }; }, { k: "fly", from: isDrop ? kid : spot, to: target, arc: (variant === "short" ? 50 : 76) * lift, style: "punt" }, { cap: "Struck cleanly...", fx: { kind: "kick", at: kid } });
     s2.go(1300, () => {}, { k: "at", p: target }, { banner: bannerOf[variant], cap: outcomeCap[variant], fx: { kind: "ring", at: { x: 100, y: 0.5 }, color: good ? GREEN : RED } });
     s2.go(500, () => {}, { k: "at", p: target });
     return { att, init: base, initBall, beats: s2.beats, names, kick: { outcome: variant, side, start: flightStart, flight: flightMs, curve, lift, aim } };

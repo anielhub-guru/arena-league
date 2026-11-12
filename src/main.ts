@@ -1,4 +1,6 @@
 import { h } from "./dom";
+import menPortrait from "./assets/men.png";
+import womenPortrait from "./assets/women.png";
 import { ATTRS, ROLES, type Gender, type MatchLog, type Player, type ShapeId, type TacticId, type Team } from "./engine/types";
 import { SHAPES, TACTICS, adviseShape, attackFit, slotPlayer } from "./engine/match";
 import { MAX_BUYS, fmtMoney, sellPrice, teenSalePrice, wageOf } from "./league/economy";
@@ -238,7 +240,7 @@ function playerTable(team: Team, opts: { selectable?: boolean } = {}): HTMLEleme
     const shown = oop ? slotPlayer(p, slot as Player["role"]) : p;
     const tr = h("tr", { class: `${slot === "Bench" ? "bench" : "starter"} ${selectedPlayer === p.id ? "sel" : ""}` },
       h("td", { class: "slot" }, slot),
-      h("td", { class: "club" }, p.name, oop ? h("span", { class: "oop", title: "Out of position: -5 to every attribute" }, " ⚠ -5") : null, isSuspended(p) ? h("span", { class: "card-chip r", title: "Sent off in the last match: misses the next one" }, "SUSPENDED") : null, p.retiring ? h("span", { class: "card-chip r", title: "Retires when you confirm your offseason signings" }, "RETIRING") : null),
+      h("td", { class: "club" }, p.name, oop ? h("span", { class: "oop", title: "Out of position: -5 to every attribute" }, " ⚠ -5") : null, isSuspended(p) ? h("span", { class: "card-chip r", title: "Sent off in the last match: misses the next one" }, "SUSPENDED") : null, (p.tired ?? 0) >= 8 ? h("span", { class: "oop", title: `Tired from recent matches (${Math.round(p.tired!)}/100): starts the match slightly weaker and tires faster. High stamina recovers quicker. Rest a player to freshen them.` }, (p.tired ?? 0) >= 20 ? " ● Tired" : " ● Weary") : null, p.retiring ? h("span", { class: "card-chip r", title: "Retires when you confirm your offseason signings" }, "RETIRING") : null),
       h("td", {}, p.role),
       h("td", {}, String(p.age)),
       ...(showPot ? [h("td", { class: "stars", title: `Potential ${p.potential ?? "?"}` }, p.potential ? stars(p.potential) : "")] : []),
@@ -639,52 +641,30 @@ function fixturesView(s: SeasonState): HTMLElement {
 }
 
 
-// 12x16 pixel-art players for the league picker. . = empty, h hair, s skin, e eye, j jersey, w stripe, t shorts, b boots
-const SPRITES: Record<Gender, { rows: string[]; pal: Record<string, string> }> = {
-  men: {
-    rows: ["...hhhhhh...", "..hhhhhhhh..", "..hssssssh..", "..ssessess..", "...ssssss...", "....ssss....", ".jjjjjjjjjj.", "ssjjjjjjjjss", "ssjjwwwwjjss", "ssjjjjjjjjss", ".sjjjjjjjjs.", "..tttttttt..", "..tttttttt..", "..ss....ss..", "..ss....ss..", ".bbbb..bbbb."],
-    pal: { h: "#4a3321", s: "#f0c49a", e: "#1a1a1a", j: "#2f8f4e", w: "#e8f5ec", t: "#1d3a28", b: "#0e1a13" },
-  },
-  women: {
-    rows: ["...hhhhhh...", "..hhhhhhhh..", "..hhsssshh..", ".hhsesseshh.", ".hhsssssshh.", ".hh..ss..hh.", ".hjjjjjjjjh.", "ssjjjjjjjjss", "ssjjwwwwjjss", ".sjjjjjjjjs.", "..jjjjjjjj..", "..tttttttt..", ".tttttttttt.", "..ss....ss..", "..ss....ss..", ".bbb....bbb."],
-    pal: { h: "#8a3f2a", s: "#f0c49a", e: "#1a1a1a", j: "#d65a8e", w: "#fdeaf2", t: "#4a2037", b: "#0e1a13" },
-  },
-};
-
-function pixelPlayer(g: Gender): HTMLElement {
-  const { rows, pal } = SPRITES[g];
-  let rects = "";
-  rows.forEach((row, y) => {
-    for (let x = 0; x < 12; x++) {
-      const c = row[x];
-      if (c && c !== ".") rects += `<rect x="${x}" y="${y}" width="1" height="1" fill="${pal[c]}"/>`;
-    }
-  });
-  const el = document.createElement("span");
-  el.className = "sprite";
-  el.innerHTML = `<svg viewBox="0 0 12 16" shape-rendering="crispEdges" aria-hidden="true">${rects}</svg>`;
-  return el;
-}
-
 function pickerView(): HTMLElement {
   const box = h("div", { class: "picker" }, h("h1", {}, "ARENA LEAGUE MANAGER"), h("p", { class: "dim" }, `Dominion: five-a-side rugby for territory, played across Nigeria.  Version ${__APP_VERSION__}`));
   const help = h("button", {}, "How to play");
   help.onclick = showRules;
 
   if (!pickGender) {
-    box.append(h("p", {}, "Which league will you coach?"));
-    const options: [Gender, string, string][] = [
-      ["men", "Men's league", "Eight clubs, men's squads."],
-      ["women", "Women's league", "The same eight clubs with their own women's squads."],
+    box.classList.add("wide");
+    box.append(h("p", { class: "select-tag" }, "SELECT YOUR LEAGUE"));
+    const options: [Gender, string, string, string, string][] = [
+      ["men", "Men's league", "Eight clubs, men's squads.", menPortrait, "01"],
+      ["women", "Women's league", "The same eight clubs with their own women's squads.", womenPortrait, "02"],
     ];
-    for (const [g, title, blurb] of options) {
-      const b = h("button", { class: "pick" }, pixelPlayer(g), h("div", { class: "txt" }, h("b", {}, title), h("span", { class: "dim" }, blurb)));
+    const grid = h("div", { class: "cs-grid" });
+    for (const [g, title, blurb, img, no] of options) {
+      const portrait = h("span", { class: "cs-portrait" });
+      portrait.style.setProperty("--img", `url("${img}")`);
+      const b = h("button", { class: `cs-card ${g}` }, h("span", { class: "cs-no" }, no), portrait, h("span", { class: "cs-info" }, h("b", {}, title), h("span", {}, blurb)));
       b.onclick = () => {
         pickGender = g;
         render();
       };
-      box.append(b);
+      grid.append(b);
     }
+    box.append(grid);
     box.append(h("p", { class: "dim" }, "The clubs are fixed. The players are generated fresh every time you start a new game, so each game has different squads and stars."), help);
     return box;
   }

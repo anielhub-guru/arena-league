@@ -111,6 +111,7 @@ const SECTIONS: Section[] = [
     title: "Kicks and restarts",
     body: () => [
       ul(
+        [b("Grubber and chip and chase"), ": near the opposition line, a kicker can poke a low ", b("grubber"), " that skips and rolls along the ground through the gap, or lift a short, high ", b("chip"), " over the rushing defence. A chaser sprints after it and a defender races back. If the chaser wins the race and grounds it in-goal it is a try (5 points); otherwise the defender covers it or it runs dead, and the defence restarts with a drop-out. Attacking sides try it most, Defensive sides least. In the arena a passed ball is long and pointed with its laces turning, a long kick tumbles end over end, a chip turns slowly, and a grubber skips and wobbles. A ball in a player's hands never spins."],
         [b("Kick for territory"), ": a long kick to push the other team back. A kicker's Kicking rating decides how far it goes. Kicks are more likely deep in your own half, and the Territory tactic kicks the most."],
         [b("Dead ball"), ": a kick that lands past the end of the arena. The other team restarts with a drop-out from their 22."],
         [b("The 22"), ": the zone in the 22 metres in front of each try line. You will hear it in the commentary (\"pinned deep in their own 22\", \"inside the opposition 22\")."],

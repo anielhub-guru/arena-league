@@ -1,5 +1,5 @@
 import { hashSeed, Rng } from "../engine/rng";
-import { MatchSim, RED_BAN, SHAPE_BY_STYLE, attackFit } from "../engine/match";
+import { MatchSim, RED_BAN, SHAPE_BY_STYLE, attackFit, slotPlayer } from "../engine/match";
 import { STAT_KEYS, emptyTotals, ROLES, type Attr, type Gender, type MatchLog, type Player, type PlayerTotals, type Role, type ShapeId, type TacticId, type Team } from "../engine/types";
 import { describeLine, impact, playerOfTheMatch } from "./awards";
 import { buildSchedule, type Fixture } from "./schedule";
@@ -167,6 +167,8 @@ export function buildSim(s: SeasonState, f: Fixture, live = false): MatchSim {
     homeShape: home.id === s.managedId ? s.shape : SHAPE_BY_STYLE[aiTactic(home)],
     awayShape: away.id === s.managedId ? s.shape : SHAPE_BY_STYLE[aiTactic(away)],
     // AI clubs always adapt after a card; the manager decides themselves when watching live.
+    homeAiSubs: home.id !== s.managedId,
+    awayAiSubs: away.id !== s.managedId,
     homeAuto: !(live && home.id === s.managedId),
     awayAuto: !(live && away.id === s.managedId),
     seed: hashSeed(s.seed, s.season, f.id),
@@ -216,6 +218,8 @@ export function playMatchday(prev: SeasonState, managedLog?: MatchLog): { state:
     if (now === 1 && was !== 1) news.push("You have gone top of the table.");
   }
   news.push(...recordPlayers(state, logs));
+  applyLoad(state, logs);
+  for (const club of state.teams) if (club.id !== state.managedId) aiRest(club);
   news.push(...train(state, md));
   state.news = [...news.map((text) => ({ season: state.season, matchday: md, text })), ...state.news].slice(0, 14);
   state.matchday++;
@@ -233,6 +237,52 @@ export function careerLine(s: SeasonState, id: string): CareerTotals {
     if (now.apps > 0) total.seasons++;
   }
   return total;
+}
+
+/**
+ * Post-match tiredness, driven by stamina. Minutes on the pitch add load (less for high stamina),
+ * then everyone recovers a share of it before the next matchday (faster for high stamina). Resting
+ * players recover fully in a couple of matches; a stamina-60 regular settles around 18, stamina 40 around 33.
+ */
+export const LOAD_PER_MATCH = 30;
+export function afterMatch(p: { stamina: number; tired?: number }, share: number): number {
+  const gain = LOAD_PER_MATCH * share * (1.5 - p.stamina / 100);
+  const recover = 0.3 + p.stamina * 0.005;
+  return Math.min(100, Math.max(0, ((p.tired ?? 0) + gain) * (1 - recover)));
+}
+
+function applyLoad(state: SeasonState, logs: MatchLog[]) {
+  const load: Record<string, number> = Object.assign({}, ...logs.map((l) => l.load ?? {}));
+  for (const t of state.teams) {
+    for (const p of t.players) {
+      const v = afterMatch(p, load[p.id] ?? 0);
+      if (v < 0.5) delete p.tired;
+      else p.tired = Math.round(v * 10) / 10;
+    }
+  }
+}
+
+/**
+ * AI clubs rest tired players between matches. Each slot goes to whoever scores best once tiredness is
+ * counted (it costs stat points at kickoff and drains stamina faster), so a worn-out low-stamina starter
+ * sits when the bench is close in quality, and a high-stamina one plays on.
+ */
+export function aiRest(club: Team) {
+  const score = (p: Player, slot: Role) => {
+    const eff = overall(slotPlayer(p, slot));
+    const t = (p.tired ?? 0) / 100;
+    // A natural fit keeps its place unless tiredness really bites.
+    return eff * (1 - t * 0.15) - t * 8 + (p.role === slot ? 3 : 0);
+  };
+  const free = club.players.filter((p) => !isSuspended(p));
+  const used = new Set<string>();
+  const next = ROLES.map((slot, i) => {
+    const pick = free.filter((p) => !used.has(p.id)).sort((a, b) => score(b, slot) - score(a, slot))[0];
+    const keep = pick ?? club.players.find((p) => p.id === club.lineup[i])!;
+    used.add(keep.id);
+    return keep.id;
+  });
+  club.lineup = next;
 }
 
 export const isSuspended = (p: { ban?: number }) => (p.ban ?? 0) > 0;
@@ -305,8 +355,23 @@ function train(state: SeasonState, md: number): string[] {
     p[attr]++;
     out.push(`Training: ${p.name} improved ${attr} to ${p[attr]}.`);
   }
+  // AI clubs train too, but slower than a manager who is paying attention: one player a week, half the time,
+  // on a focus of the club's own. Same ceiling (potential) as everyone else. No news for these.
+  const keys = Object.keys(TRAINING) as TrainingFocus[];
+  for (const club of state.teams) {
+    if (club.id === state.managedId) continue;
+    const r = new Rng(hashSeed(state.seed, state.season, "ai-train", md, club.id));
+    if (!r.chance(AI_TRAIN_CHANCE)) continue;
+    const p = r.pick(club.players);
+    const attr = r.pick(TRAINING[keys[Math.floor(r.next() * keys.length)]].attrs);
+    if (p[attr] >= 95 || overall(p) >= (p.potential ?? 99)) continue;
+    p[attr]++;
+  }
   return out;
 }
+
+/** Weekly chance that an AI club's training lifts one player by a point (the manager's club gets up to three at 80%). */
+const AI_TRAIN_CHANCE = 0.5;
 
 export function startNextSeason(prev: SeasonState): SeasonState {
   if (!isSeasonOver(prev)) throw new Error("Season is not over");
@@ -321,6 +386,7 @@ export function startNextSeason(prev: SeasonState): SeasonState {
     if (now.apps > 0) career.seasons++;
   }
   state.seasonStats = {};
+  for (const t of state.teams) for (const p of t.players) delete p.tired;
   const news: string[] = [];
   // Season finances: prize money for the finishing position, less the wage bill.
   const prize = prizeFor(finish);

@@ -1,4 +1,4 @@
-import { sceneMs, type Ball, type Hit, type KickView, type Scene } from "./scenes";
+import { sceneMs, type Ball, type BallStyle, type Hit, type KickView, type Scene } from "./scenes";
 
 /**
  * Top-down arena renderer. It only draws while a highlight scene is playing; the live
@@ -52,6 +52,8 @@ interface Agent {
   y: number; // metres across
   vx: number;
   vy: number;
+  /** Milliseconds spent sprinting with a tackle on the way: top speed fades with it. */
+  sprint: number;
   hx: number; // heading
   hy: number;
   /** Milliseconds left lying on the ground after a tackle or dive. */
@@ -88,6 +90,11 @@ interface Sim {
   agents: Record<string, Agent>;
   ball: BallState;
   holder: string | null;
+  /** How the ball is moving this frame: null when held or at rest, else a spin style. */
+  style: "spiral" | BallStyle | null;
+  /** Screen position last frame, to point a passed ball along its flight. */
+  lastPx: { x: number; y: number };
+  heading: number;
   t: number;
   beat: number;
   beatStart: number;
@@ -99,6 +106,8 @@ interface Sim {
   rings: Ring[];
   floaters: Floater[];
   hitsDone: Set<string>;
+  /** Collisions from an earlier beat that have not happened yet because the players have not met. */
+  late: { hit: Hit; key: string; since: number }[];
   /** How long the ball takes to travel into a holder's hands at the start of a "held" beat. */
   glideMs: number;
 }
@@ -184,7 +193,7 @@ export class ArenaView {
     const agents: Record<string, Agent> = {};
     for (const [id, p] of Object.entries(scene.init)) {
       const dir = id[0] === "a" ? 1 : -1;
-      agents[id] = { x: p.x, y: p.y * WIDTH_M, vx: 0, vy: 0, hx: dir, hy: 0, down: 0, trail: [] };
+      agents[id] = { x: p.x, y: p.y * WIDTH_M, vx: 0, vy: 0, sprint: 0, hx: dir, hy: 0, down: 0, trail: [] };
     }
     const b = scene.initBall;
     const start =
@@ -193,6 +202,9 @@ export class ArenaView {
       agents,
       ball: { x: start.x, y: start.y, z: 0, vx: 0, vy: 0, vz: 0, free: false },
       holder: b.k === "held" ? b.by : null,
+      style: null,
+      lastPx: { x: 0, y: 0 },
+      heading: 0,
       t: 0,
       beat: -1,
       beatStart: 0,
@@ -203,6 +215,7 @@ export class ArenaView {
       rings: [],
       floaters: [],
       hitsDone: new Set(),
+      late: [],
       glideMs: 140,
     };
     this.enterBeat(0);
@@ -214,6 +227,11 @@ export class ArenaView {
     if (i >= s.beats.length) return;
     const prev = i > 0 ? s.beats[i - 1] : null;
     const beat = s.beats[i];
+    // A tackle that has not happened yet stays pending: the tackler keeps chasing until contact.
+    if (prev) prev.hits?.forEach((hit, k) => {
+      const key = `${i - 1}:${k}`;
+      if (!sim.hitsDone.has(key)) sim.late.push({ hit, key, since: sim.t });
+    });
     // A flight that ends with the ball loose keeps going: it bounces and rolls on landing.
     if (prev && (prev.ball.k === "fly" || prev.ball.k === "pass") && beat.ball.k === "at") {
       const T = Math.max(0.2, prev.ms / 1000);
@@ -260,6 +278,11 @@ export class ArenaView {
     const holder = beat.ball.k === "held" ? beat.ball.by : null;
 
     const ids = Object.keys(sim.agents);
+    // Collisions still to happen: this beat's, plus any left over from earlier beats.
+    const pending = [
+      ...sim.late.filter((l) => !sim.hitsDone.has(l.key)),
+      ...(beat.hits ?? []).map((hit, i) => ({ hit, key: `${sim.beat}:${i}`, since: -1 })),
+    ].filter((l) => !sim.hitsDone.has(l.key));
     for (const id of ids) {
       const a = sim.agents[id];
       if (a.down > 0) {
@@ -272,25 +295,67 @@ export class ArenaView {
       }
       const slot = Number(id[1]);
       const tgt = beat.to[id];
-      let dx = tgt.x - a.x;
-      let dy = tgt.y * WIDTH_M - a.y;
+      let tx = tgt.x;
+      let ty = tgt.y * WIDTH_M;
+      // Tacklers chase the runner they are meant to hit and the runner keeps running until it happens.
+      const chase = pending.find((h) => h.hit.other === id);
+      const running = pending.find((h) => h.hit.runner === id);
+      let vmax = VMAX[slot];
+      let accel = ACCEL[slot];
+      if (chase) {
+        const R = sim.agents[chase.hit.runner];
+        tx = R.x + R.vx * 0.18;
+        ty = R.y + R.vy * 0.18;
+        vmax *= 1.5; // a tackler launches himself: faster than a runner with the ball
+        accel *= 1.6;
+      }
+      let dx = tx - a.x;
+      let dy = ty - a.y;
       const dist = Math.hypot(dx, dy);
       let desiredSpeed = 0;
-      if (since >= sim.delay[id] && dist > 0.15) {
+      if (chase) {
+        if (since >= sim.delay[id]) desiredSpeed = vmax;
+      } else if (running) {
+        // The carrier does not wait to be hit: he keeps driving on, past his mark if he has to. He is often
+        // ahead of the script (the choreography assumes a slower run), so a mark that is now behind him
+        // is dropped: he never turns back into the tackle, he keeps going and the tackler catches him.
+        const fwd = id[0] === "a" ? 1 : -1;
+        const pastMark = (tx - a.x) * fwd < 1;
+        if (pastMark) {
+          dx = fwd * 4;
+          dy = clamp(ty - a.y, -2, 2);
+        } else if (dist < 2) {
+          dx = a.hx * 4;
+          dy = a.hy * 4;
+        }
+        const remaining = Math.max(0.2, (beatEnd - sim.t) / 1000);
+        // Nobody sprints flat out for ever: the longer he is chased, the more his top speed fades (to 60%),
+        // so the tackler gradually closes the gap instead of the carrier running on or turning round.
+        a.sprint += dt;
+        const fade = 1 - 0.4 * Math.min(1, a.sprint / 2200);
+        vmax *= fade;
+        desiredSpeed = pastMark ? vmax * 0.85 : Math.max(Math.min(vmax, dist / remaining), vmax * 0.75);
+      } else if (since >= sim.delay[id] && dist > 0.15) {
         // Aim to arrive as the beat ends; never faster than the player can run, ease off when close.
         const remaining = Math.max(0.2, (beatEnd - sim.t) / 1000);
         const brake = Math.sqrt(2 * ACCEL[slot] * 0.7 * dist);
         desiredSpeed = Math.min(VMAX[slot], dist / remaining, brake);
         if (dist < 0.6) desiredSpeed = Math.min(desiredSpeed, dist * 4);
+        // The ball carrier never sprints back the way he came, even if the script's next mark is behind
+        // him (he has run on further than the choreography assumed): he settles where he is.
+        if (holder === id && (tx - a.x) * (id[0] === "a" ? 1 : -1) < -0.3) desiredSpeed = Math.min(desiredSpeed, 1.2);
       }
-      const inv = dist > 0.0001 ? 1 / dist : 0;
+      const dl = Math.hypot(dx, dy);
+      const inv = dl > 0.0001 ? 1 / dl : 0;
       dx *= inv;
       dy *= inv;
+      // A runner under pressure shifts his line from side to side, looking for a gap.
+      if (running && running.hit.kind === "tackle") dy += Math.sin(sim.t / 170 + slot) * 0.35;
       // Steer: change velocity towards the desired one, limited by acceleration.
       let ax = dx * desiredSpeed - a.vx;
       let ay = dy * desiredSpeed - a.vy;
       const am = Math.hypot(ax, ay);
-      const maxDv = ACCEL[slot] * sec;
+      const maxDv = accel * sec;
       if (am > maxDv) {
         ax = (ax / am) * maxDv;
         ay = (ay / am) * maxDv;
@@ -299,16 +364,31 @@ export class ArenaView {
       a.vy += ay;
     }
 
-    // Scripted collisions fire when the two players actually meet.
-    beat.hits?.forEach((hit, i) => {
-      const key = `${sim.beat}:${i}`;
-      if (sim.hitsDone.has(key) || since < (hit.at ?? 0.4) * beat.ms) return;
+    // Scripted collisions fire only when the two players actually touch. A tackle needs real
+    // contact; a missed tackle is a dive from a little further out.
+    for (const l of pending) {
+      const { hit, key } = l;
+      const late = l.since >= 0;
+      if (!late && since < (hit.at ?? 0.4) * beat.ms) continue;
       const R = sim.agents[hit.runner];
       const O = sim.agents[hit.other];
-      if (Math.hypot(O.x - R.x, O.y - R.y) > 2.1 && since < beat.ms - 40) return;
+      if (R.down > 0 || O.down > 0) {
+        if (late) continue;
+      }
+      const reach = hit.kind === "miss" ? 2.1 : 1.45;
+      const gap = Math.hypot(O.x - R.x, O.y - R.y);
+      if (gap > reach) {
+        // Safety net: if the chase has gone on far too long, close the gap rather than tackle thin air.
+        if (!(late && sim.t - l.since > 1400) && !(!late && sim.t - sim.beatStart > beat.ms + 1400)) continue;
+        const bx = R.x - R.hx * (reach - 0.2);
+        const by = R.y - R.hy * (reach - 0.2);
+        O.x = bx;
+        O.y = by;
+      }
       sim.hitsDone.add(key);
       this.applyHit(hit, R, O);
-    });
+    }
+    sim.late = sim.late.filter((l) => !sim.hitsDone.has(l.key));
 
     // Personal space: nudge players apart (but let the ball carrier and tacklers collide).
     for (let i = 0; i < ids.length; i++) {
@@ -335,7 +415,9 @@ export class ArenaView {
     if (sample) sim.trailClock = 0;
     for (const id of ids) {
       const a = sim.agents[id];
-      a.x += a.vx * sec;
+      // Nobody runs off the end of the field: the dead-ball line stops them.
+      a.x = clamp(a.x + a.vx * sec, -2, 102.5);
+      if (a.x === 102.5 || a.x === -2) a.vx = 0;
       a.y = clamp(a.y + a.vy * sec, 1.5, WIDTH_M - 1.5);
       const sp = Math.hypot(a.vx, a.vy);
       if (sp > 1.5 && a.down <= 0) {
@@ -422,6 +504,7 @@ export class ArenaView {
     const u = clamp(since / Math.max(1, ms), 0, 1);
     const ball = sim.ball;
     const from = sim.ballFrom;
+    sim.style = b.k === "pass" ? "spiral" : b.k === "fly" ? (b.style ?? "punt") : null;
     switch (b.k) {
       case "held": {
         const a = sim.agents[b.by];
@@ -434,6 +517,7 @@ export class ArenaView {
       case "at": {
         if (ball.free) {
           this.physics(sec);
+          if (ball.z > 0.05 || Math.hypot(ball.vx, ball.vy) > 1) sim.style = "loose";
         } else {
           const k = Math.min(1, since / 120);
           ball.x = lerp(from.x, b.p.x, k);
@@ -453,7 +537,8 @@ export class ArenaView {
       case "fly": {
         ball.x = lerp(from.x, b.to.x, u);
         ball.y = lerp(from.y, b.to.y * WIDTH_M, u);
-        ball.z = (4 * b.arc * u * (1 - u)) / LIFT_PX;
+        // A grubber skips along the ground in a few shrinking hops; every other kick is one arc.
+        ball.z = b.style === "grubber" ? (b.arc * Math.abs(Math.sin(u * Math.PI * 3.5)) * (1 - 0.6 * u)) / LIFT_PX : (4 * b.arc * u * (1 - u)) / LIFT_PX;
         break;
       }
     }
@@ -712,18 +797,45 @@ export class ArenaView {
     ctx.fill();
     ctx.save();
     ctx.translate(bxp, byp - 7 - lift);
-    ctx.rotate(lift > 1 ? sim.t / 110 : 0);
+    // The way the ball turns says what happened to it. Held: no spin at all. Pass: a spiral, long axis
+    // along the flight with the laces turning. Punt: end over end. Chip: a slow, high tumble. Grubber:
+    // a wobbling roll that skips. Loose: an uncontrolled tumble.
+    const st = sim.holder ? null : sim.style;
+    const ddx = bxp - sim.lastPx.x;
+    const ddy = byp - lift - sim.lastPx.y;
+    if (Math.hypot(ddx, ddy) > 0.4) sim.heading = Math.atan2(ddy, ddx);
+    sim.lastPx = { x: bxp, y: byp - lift };
     const bs = 1 + Math.min(0.5, lift / 90);
     ctx.scale(bs, bs);
+    let laces = 0;
+    let half = 4.6;
+    if (st === "spiral") {
+      ctx.rotate(sim.heading);
+      half = 3.6;
+      laces = Math.sin(sim.t / 45) * 1.5;
+      ctx.strokeStyle = "rgba(255,255,255,0.55)";
+      ctx.lineWidth = 1;
+      for (const o of [-1.5, 1.5]) {
+        ctx.beginPath();
+        ctx.moveTo(-9, o);
+        ctx.lineTo(-17, o);
+        ctx.stroke();
+      }
+    } else if (st === "punt") ctx.rotate(sim.t / 90);
+    else if (st === "chip") ctx.rotate(sim.t / 170);
+    else if (st === "grubber") {
+      ctx.rotate(sim.heading + Math.sin(sim.t / 60) * 0.9);
+      half = 4.6 - Math.abs(Math.sin(sim.t / 120)) * 1.2;
+    } else if (st === "loose") ctx.rotate(sim.t / 130);
     ctx.fillStyle = "#ffffff";
     ctx.beginPath();
-    ctx.ellipse(0, 0, 7, 4.6, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, 7, half, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = "#7a5b3a";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(-3, 0);
-    ctx.lineTo(3, 0);
+    ctx.moveTo(-3, laces);
+    ctx.lineTo(3, laces);
     ctx.stroke();
     ctx.restore();
 

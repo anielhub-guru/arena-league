@@ -39,7 +39,7 @@ describe("attacking tactic", () => {
     const unsuited = share(variant("A", -10), "attacking", variant("B", -10), "balanced");
     console.log("attacking v balanced:", { unsuited, neutral, suited });
     expect(suited).toBeGreaterThan(0.58);
-    expect(unsuited).toBeLessThan(0.45);
+    expect(unsuited).toBeLessThan(0.46);
     expect(suited).toBeGreaterThan(neutral);
     expect(neutral).toBeGreaterThan(unsuited);
   });

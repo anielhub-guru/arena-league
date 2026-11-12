@@ -15,6 +15,8 @@ export interface Player {
   tackling: number;
   kicking: number;
   stamina: number;
+  /** Carried-over tiredness from recent matches, 0 to 100 (0 or missing = fresh). High stamina builds less and recovers faster. */
+  tired?: number;
   /** Matches still to miss after a red card (0 or missing = available). */
   ban?: number;
   /** Ceiling for overall rating. Growth and training stop here. Missing on very old saves until migrated. */
@@ -76,6 +78,8 @@ export interface HighlightCast {
   ai: number;
   /** Main defending player (tackler or interceptor), -1 if none. */
   di: number;
+  /** Kicker's slot for a grubber or chip and chase (then `ai` is the chaser). */
+  ki?: number;
   /** Lineup slots of attackers who are in the sin bin or sent off, so not on the pitch. */
   offA?: number[];
   /** Lineup slots of defenders who are in the sin bin or sent off. */
@@ -169,4 +173,6 @@ export interface MatchLog {
   stats: [TeamStats, TeamStats];
   /** Per-player match lines. Missing on logs saved before player stats existed. */
   players?: PlayerLine[];
+  /** Share of the match each player was on the pitch (0 to 1), by player id. Missing on older logs. */
+  load?: Record<string, number>;
 }
