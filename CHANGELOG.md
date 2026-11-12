@@ -4,7 +4,7 @@ Versions follow `MAJOR.MINOR.PATCH`. The version lives in `package.json` and is 
 `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` (a test fails if they
 drift apart). It is shown in the app footer and on the new-game screen.
 
-## Unreleased
+## 0.6.0 (stable alpha)
 
 - Matches are more draining (fatigue 0.65), so substitutions matter. Tiredness now carries between matches:
   playing a lot builds it, resting clears it, and both scale with the player's stamina. Tired players start
