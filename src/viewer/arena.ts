@@ -840,7 +840,7 @@ export class ArenaView {
 
     // Ball path. Heights are screen y: smaller y means higher. The plane of the posts is at u = 1.
     const plane = {
-      good: { x: cx + sx * 10, y: top + H * 0.24 },
+      good: { x: cx + k.aim * (gap - 16), y: top + H * (0.2 + 0.08 * (k.lift - 0.8) / 0.45) },
       "post-in": { x: cx + sx * (gap - 3), y: top + H * 0.28 },
       post: { x: cx + sx * gap, y: top + H * 0.3 },
       wide: { x: cx + sx * (gap + 95), y: top + H * 0.27 },
@@ -857,7 +857,12 @@ export class ArenaView {
         const u2 = Math.min(uu / 0.8, 1);
         return { x: lerp(start.x, plane.x, easeU(u2)), y: lerp(start.y, plane.y, u2) - Math.sin(Math.PI * u2) * H * 0.2, r: lerp(18, 9, u2), depth: u2 };
       }
-      return { x: lerp(start.x, plane.x, easeU(uu)), y: lerp(start.y, plane.y, uu) - Math.sin(Math.PI * uu) * H * 0.36, r: lerp(18, 7, uu), depth: uu };
+      return {
+        x: lerp(start.x, plane.x, easeU(uu)) + Math.sin(Math.PI * uu) * k.curve * 26,
+        y: lerp(start.y, plane.y, uu) - Math.sin(Math.PI * uu) * H * 0.36 * k.lift,
+        r: lerp(18, 7, uu),
+        depth: uu,
+      };
     };
 
     let bx: number;

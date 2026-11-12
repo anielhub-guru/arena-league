@@ -399,6 +399,8 @@ export interface PlanCheck {
   teenIncome: number;
   buyCost: number;
   moneyAfter: number;
+  /** The squad as it would be after the plan. */
+  roster: Player[];
 }
 
 /** Checks a plan without applying it. The offseason screen uses this to explain why Confirm is disabled. */
@@ -425,7 +427,7 @@ export function checkPlan(s: SeasonState, plan: OffseasonPlan): PlanCheck {
   const moneyAfter = s.money + sellIncome + teenIncome - buyCost;
   // Debt never blocks the season (you can always refill the squad for free), it only stops you buying.
   if (buyCost > 0 && moneyAfter < 0) problems.push(`You cannot afford this: the balance would be ${fmtMoney(moneyAfter)}.`);
-  return { ok: problems.length === 0, problems, size: roster.length, sellIncome, teenIncome, buyCost, moneyAfter };
+  return { ok: problems.length === 0, problems, size: roster.length, sellIncome, teenIncome, buyCost, moneyAfter, roster };
 }
 
 /** A sensible default: the best scouted prospect for each retiree's position, no selling, no buying. */

@@ -4,6 +4,16 @@ Versions follow `MAJOR.MINOR.PATCH`. The version lives in `package.json` and is 
 `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` (a test fails if they
 drift apart). It is shown in the app footer and on the new-game screen.
 
+## 0.5.0
+
+- League picker redesigned: pixel-art man and woman on the Men's / Women's league cards, left-aligned
+  layout and a hover effect.
+- Spider (radar) chart of the six ratings. Squad tab: **Team shape** (your starting five against the next
+  opponent or the league average, with the ratings your tactic leans on marked) and a **Player profile**
+  when you select a player. Offseason: your best five now against after your plan, and a profile of any
+  player you click (yours, a prospect or a listed player) against the player they would replace.
+  Counting stats stay in the table, since a radar suits ratings but not mixed-unit stats.
+
 ## 0.4.0
 
 - Attacking is now strong only for the right side. Its bonus scales with the pace and handling of your

@@ -56,6 +56,12 @@ export interface KickView {
   /** Scene time (ms) at which the ball is struck, and how long the flight lasts. */
   start: number;
   flight: number;
+  /** Sideways bend of the ball in flight, -1..1 (screen direction), peaking mid-flight. */
+  curve: number;
+  /** Multiplier on the height of the arc (1 = default). */
+  lift: number;
+  /** Where a successful kick crosses the plane of the posts, -1..1 across the goal mouth. */
+  aim: number;
 }
 export interface Scene {
   kick?: KickView;
@@ -656,17 +662,38 @@ function buildFullScene(ev: MatchEvent): Scene | null {
     const rest: Ball = isDrop ? { k: "held", by: kid } : { k: "at", p: { ...spot } };
     initBall = rest;
     const what = isConv ? "Conversion" : isDrop ? "Drop goal" : "Penalty";
-    s2.go(900, () => {}, rest, {
+    // Deterministic per-kick variation: approach angle, routine length, strike style and flight shape.
+    const routine = (["quick", "standard", "deliberate", "angled"] as const)[Math.floor(r(11) * 4)];
+    const stepBack = routine === "quick" ? 1.5 : routine === "deliberate" ? 4 : 2.5 + r(12) * 1.5;
+    const lean = routine === "angled" ? (r(13) < 0.5 ? -1 : 1) * (0.07 + r(14) * 0.05) : (r(14) - 0.5) * 0.04;
+    const settleMs = routine === "quick" ? 450 : routine === "deliberate" ? 1100 : 900;
+    const stepMs = routine === "quick" ? 260 : routine === "deliberate" ? 520 : 350;
+    const runMs = routine === "quick" ? 300 : routine === "angled" ? 440 : 380;
+    const flightMs = Math.round(1250 + r(15) * 500);
+    const lift = 0.8 + r(16) * 0.45;
+    const curve = variant === "wide" ? side * (0.4 + r(17) * 0.6) : (r(17) - 0.5) * 0.9;
+    const aim = variant === "good" ? (r(18) - 0.5) * 1.3 : 0;
+    const routineCap: Record<typeof routine, string> = {
+      quick: `${what} from ${dist}m. No fuss, the kicker takes one step back and goes.`,
+      standard: `${what} from ${dist}m. The kicker steps back and lines it up.`,
+      deliberate: `${what} from ${dist}m. The kicker takes a long, careful look at the posts.`,
+      angled: `${what} from ${dist}m. The kicker marks out an angled run-up.`,
+    };
+    s2.go(settleMs, () => {}, rest, {
       cap: isConv
         ? "Conversion: the kick must go over the crossbar and between the posts for 2 points"
         : isDrop
           ? "Drop goal: kicked from open play, over the bar and between the posts, 3 points"
           : "Penalty kick at goal: over the bar and between the posts for 3 points",
     });
-    s2.go(350, (q) => { q[kid] = { x: spot.x - 2.5, y: spot.y + 0.04 }; }, rest, { cap: `${what} from ${dist}m. The kicker steps back and lines it up.` });
-    s2.go(380, (q) => {
+    s2.go(stepMs, (q) => { q[kid] = { x: spot.x - stepBack, y: spot.y + lean }; }, rest, { cap: routineCap[routine] });
+    if (routine === "deliberate") {
+      s2.go(380, (q) => { q[kid] = { x: spot.x - stepBack, y: spot.y + lean }; }, rest, { cap: "Deep breath. The stadium goes quiet." });
+    }
+    s2.go(runMs, (q) => {
       q[kid] = { x: spot.x - 0.6, y: spot.y };
       if (isDrop) for (let i = 0; i < 3; i++) q[D(i)] = { x: spot.x + 3.5, y: lerp(LANE_D[i], spot.y, 0.5) };
+      else if (!isConv && routine !== "quick") for (let i = 0; i < 5; i++) q[D(i)] = { x: spot.x + 10, y: 0.2 + i * 0.15 };
     }, rest);
     const flightStart = s2.beats.reduce((t, b) => t + b.ms, 0);
     const target: Pt =
@@ -687,10 +714,10 @@ function buildFullScene(ev: MatchEvent): Scene | null {
       wide: { text: `WIDE ${side < 0 ? "LEFT" : "RIGHT"}!`, color: RED, sub: ev.player },
       short: { text: "SHORT!", color: RED, sub: ev.player },
     };
-    s2.go(1500, (q) => { q[kid] = { x: spot.x + 0.9, y: spot.y }; }, { k: "fly", from: isDrop ? kid : spot, to: target, arc: variant === "short" ? 50 : 76 }, { cap: "Struck cleanly...", fx: { kind: "kick", at: kid } });
+    s2.go(flightMs, (q) => { q[kid] = { x: spot.x + 0.9, y: spot.y }; }, { k: "fly", from: isDrop ? kid : spot, to: target, arc: (variant === "short" ? 50 : 76) * lift }, { cap: "Struck cleanly...", fx: { kind: "kick", at: kid } });
     s2.go(1300, () => {}, { k: "at", p: target }, { banner: bannerOf[variant], cap: outcomeCap[variant], fx: { kind: "ring", at: { x: 100, y: 0.5 }, color: good ? GREEN : RED } });
     s2.go(500, () => {}, { k: "at", p: target });
-    return { att, init: base, initBall, beats: s2.beats, names, kick: { outcome: variant, side, start: flightStart, flight: 1500 } };
+    return { att, init: base, initBall, beats: s2.beats, names, kick: { outcome: variant, side, start: flightStart, flight: flightMs, curve, lift, aim } };
   } else {
     return null;
   }

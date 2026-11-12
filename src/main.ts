@@ -25,6 +25,7 @@ import { computeStandings, teamForm } from "./league/standings";
 import { TEAM_DEFS, generateTeams, overall, potentialStars, teamRating } from "./league/teams";
 import * as store from "./storage";
 import { LiveMatch } from "./viewer/live";
+import { ATTR_NAMES, TACTIC_FOCUS, bestFive, buildRadar, playerProfile, profileOf } from "./viewer/radar";
 import { buildRules } from "./viewer/rules";
 import { buildTable } from "./viewer/table";
 
@@ -327,6 +328,9 @@ const stars = (v: number) => "★".repeat(potentialStars(v)) + "☆".repeat(5 - 
 
 /** The offseason plan being built on screen. It starts from the sensible default and the manager changes it. */
 let plan: OffseasonPlan = { sell: [], sign: [], buy: [] };
+/** Squad tab: what to compare the team shape with. Offseason: the player whose profile is open. */
+let radarVs: "opp" | "league" = "opp";
+let inspectId: string | null = null;
 let planKey = "";
 
 const toggle = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
@@ -341,6 +345,10 @@ function offseasonCard(s: SeasonState): HTMLElement {
   const team = teamById(s, s.managedId);
   const check = checkPlan(s, plan);
   const retiring = new Set(intake.retiring);
+  const inspect = (id: string) => {
+    inspectId = inspectId === id ? null : id;
+    render();
+  };
   const attrHead = ATTRS.map((a) => h("th", { title: ATTR_INFO[a][1] }, ATTR_INFO[a][0]));
   const attrCells = (p: Player) => ATTRS.map((a) => h("td", {}, String(p[a])));
   const act = (label: string, on: boolean, fn: () => void, disabled = false) => {
@@ -361,7 +369,7 @@ function offseasonCard(s: SeasonState): HTMLElement {
     const sold = plan.sell.includes(p.id);
     sb.append(
       h("tr", { class: gone || sold ? "bench" : "" },
-        h("td", { class: "club" }, p.name, gone ? h("span", { class: "card-chip r" }, "RETIRING") : null, sold ? h("span", { class: "card-chip y" }, "SELLING") : null),
+        h("td", { class: "club link", title: "Show profile", onclick: () => inspect(p.id) }, p.name, gone ? h("span", { class: "card-chip r" }, "RETIRING") : null, sold ? h("span", { class: "card-chip y" }, "SELLING") : null),
         h("td", {}, p.role), h("td", {}, String(p.age)), h("td", { class: "stars" }, stars(p.potential ?? 0)), ...attrCells(p),
         h("td", { class: "pts" }, String(overall(p))), h("td", {}, fmtMoney(sellPrice(p))), h("td", {}, fmtMoney(wageOf(p))),
         h("td", {}, gone ? "" : act(sold ? "Keep" : "Sell", sold, () => (plan = { ...plan, sell: toggle(plan.sell, p.id) })))),
@@ -378,7 +386,7 @@ function offseasonCard(s: SeasonState): HTMLElement {
     const on = plan.sign.includes(p.id);
     yb.append(
       h("tr", { class: on ? "sel" : "" },
-        h("td", { class: "club" }, p.name, vacated.has(p.role) ? h("span", { class: "oop", title: "Fills a retirement" }, " ●") : null),
+        h("td", { class: "club link", title: "Show profile", onclick: () => inspect(p.id) }, p.name, vacated.has(p.role) ? h("span", { class: "oop", title: "Fills a retirement" }, " ●") : null),
         h("td", {}, p.role), h("td", {}, String(p.age)), h("td", { class: "stars" }, stars(p.scouted ?? 0)), ...attrCells(p),
         h("td", { class: "pts" }, String(overall(p))), h("td", {}, fmtMoney(teenSalePrice(p))),
         h("td", {}, act(on ? "Signed" : "Sign", on, () => (plan = { ...plan, sign: toggle(plan.sign, p.id) })))),
@@ -395,13 +403,43 @@ function offseasonCard(s: SeasonState): HTMLElement {
     const on = plan.buy.includes(p.id);
     mb.append(
       h("tr", { class: on ? "sel" : "" },
-        h("td", { class: "club" }, p.name), h("td", {}, teamById(s, l.clubId).short), h("td", {}, p.role), h("td", {}, String(p.age)), h("td", { class: "stars" }, stars(p.scouted ?? 0)), ...attrCells(p),
+        h("td", { class: "club link", title: "Show profile", onclick: () => inspect(p.id) }, p.name), h("td", {}, teamById(s, l.clubId).short), h("td", {}, p.role), h("td", {}, String(p.age)), h("td", { class: "stars" }, stars(p.scouted ?? 0)), ...attrCells(p),
         h("td", { class: "pts" }, String(overall(p))), h("td", {}, fmtMoney(l.price)),
         h("td", {}, act(on ? "Buying" : "Buy", on, () => (plan = { ...plan, buy: toggle(plan.buy, p.id) }), !on && plan.buy.length >= MAX_BUYS))),
     );
   }
   market.append(mb);
 
+  /** Your best five now against after your plan, plus the profile of whoever you clicked. */
+  function radarBlocks(): HTMLElement[] {
+    const out: HTMLElement[] = [];
+    if (check.roster.length >= 5) {
+      out.push(h("div", { class: "hint" }, "Your best five now (before retirements) against after your plan. Click any name below to see that player's profile."));
+      out.push(buildRadar(
+        [
+          { id: "after", label: "After your plan", values: profileOf(bestFive(check.roster)), color: "--r1" },
+          { id: "now", label: "Now", values: profileOf(bestFive(team.players)), color: "--r2", alt: true },
+        ],
+        { title: "Starting five, now and after your plan", focus: TACTIC_FOCUS[s.tactic], note: s.tactic === "balanced" ? undefined : `Your tactic is ${TACTICS[s.tactic].label}.` },
+      ));
+    }
+    const who = inspectId ? [...team.players, ...intake.prospects, ...intake.market.map((l) => l.player)].find((p) => p.id === inspectId) : null;
+    if (who) {
+      const own = team.players.some((p) => p.id === who.id);
+      const rival = own
+        ? null
+        : team.players.filter((p) => p.role === who.role).sort((a, b) => Number(retiring.has(a.id)) - Number(retiring.has(b.id)) || overall(b) - overall(a))[0] ?? null;
+      const base = rival;
+      out.push(buildRadar(
+        [
+          { id: "who", label: who.name, values: playerProfile(who), color: "--r1" },
+          base ? { id: "base", label: `${base.name} (yours)`, values: playerProfile(base), color: "--r2", alt: true } : { id: "base", label: "Your best five", values: profileOf(bestFive(team.players)), color: "--r2", alt: true },
+        ],
+        { title: `Profile of ${who.name}`, note: `${who.role}, age ${who.age}, overall ${overall(who)}. Potential is a scouting estimate for players who are not yours: ${stars(who.scouted ?? who.potential ?? 0)}.` },
+      ));
+    }
+    return out;
+  }
   const confirm = h("button", { class: "primary", disabled: busy || !check.ok }, "Confirm and start the season");
   confirm.onclick = () => void guarded(async () => void (await persist(completeOffseason(s, plan))));
   const reset = h("button", {}, "Reset to default");
@@ -417,6 +455,7 @@ function offseasonCard(s: SeasonState): HTMLElement {
     h("p", { class: "dim" }, "Everything here is optional except refilling the squad to eight. Retirees leave, young prospects grow toward a potential you can only estimate, and prospects you do not sign are sold for income. Other clubs' players on the transfer list are priced by what they are really worth, so a good eye finds a bargain and a bad one finds a trap."),
     summary,
     ...(check.problems.length ? [h("div", { class: "err" }, check.problems.join(" "))] : []),
+    ...radarBlocks(),
     squad,
     h("div", { class: "hint" }, `Youth shortlist: ● marks a position that lost a player. Prospects start weaker than established players and grow, so a teenager is an investment.`),
     youth,
@@ -500,6 +539,52 @@ function squadView(s: SeasonState): HTMLElement {
   const next = managedFixture(s);
   const opp = next ? teamById(s, next.homeId === s.managedId ? next.awayId : next.homeId) : null;
   const advice = opp ? adviseShape(opp.lineup.map((id) => opp.players.find((p) => p.id === id)!)) : null;
+  const oppFive = opp ? opp.lineup.map((id, i) => slotPlayer(opp.players.find((p) => p.id === id)!, ROLES[i])) : null;
+  const leagueFive = s.teams.flatMap((t) => t.lineup.map((id) => t.players.find((p) => p.id === id)!));
+  const vs = radarVs === "opp" && oppFive ? "opp" : "league";
+  const mine = profileOf(starters);
+  const other = vs === "opp" ? profileOf(oppFive!) : profileOf(leagueFive);
+  const otherLabel = vs === "opp" ? opp!.name : "League average";
+  const focus = TACTIC_FOCUS[s.tactic];
+  const mean = (pr: typeof mine) => Math.round(focus.reduce((t, a) => t + pr[a], 0) / focus.length);
+  const names = focus.map((a) => ATTR_NAMES[a]).join(" and ");
+  const vsButtons = h("div", { class: "toolbar" }, ...(["opp", "league"] as const).map((k) => {
+    const b = h("button", { class: vs === k ? "active" : "", disabled: k === "opp" && !oppFive }, k === "opp" ? `Next opponent${opp ? ` (${opp.short})` : ""}` : "League average");
+    b.onclick = () => {
+      radarVs = k;
+      render();
+    };
+    return b;
+  }));
+  const shapeCard = card(
+    "Team shape",
+    h("div", { class: "hint" }, "Average of each rating across your starting five as they will play (out-of-position penalty included). The scale is fixed at 40 to 90, so you can compare shapes at a glance."),
+    vsButtons,
+    buildRadar(
+      [
+        { id: "you", label: team.name, values: mine, color: "--r1" },
+        { id: "other", label: otherLabel, values: other, color: "--r2", alt: true },
+      ],
+      {
+        title: "Team shape",
+        focus,
+        note: focus.length ? `${TACTICS[s.tactic].label} leans on ${names}: yours average ${mean(mine)}, ${otherLabel} ${mean(other)}.` : "Balanced makes no special demand, so an even shape is fine. Switch tactic to see which ratings it leans on.",
+      },
+    ),
+  );
+  const picked = selectedPlayer ? team.players.find((p) => p.id === selectedPlayer) : null;
+  const profileCard = picked
+    ? card(
+        `Player profile: ${picked.name}`,
+        buildRadar(
+          [
+            { id: "p", label: picked.name, values: playerProfile(picked), color: "--r1" },
+            { id: "t", label: "Starting five average", values: mine, color: "--r2", alt: true },
+          ],
+          { title: `Profile of ${picked.name}`, note: `${picked.role}, age ${picked.age}, potential ${stars(picked.potential ?? 0)}. Click another player to swap, or the same player to close.` },
+        ),
+      )
+    : null;
   const shapes = h("div", { class: "choices three" });
   for (const [id, sh] of Object.entries(SHAPES)) {
     const rec = advice?.best === id;
@@ -515,6 +600,8 @@ function squadView(s: SeasonState): HTMLElement {
   }
   return h("div", { class: "col" },
     card(`${team.name} - starting five & bench`, h("div", { class: "hint" }, hint), playerTable(team, { selectable: true })),
+    ...(profileCard ? [profileCard] : []),
+    shapeCard,
     card("Player stats", h("div", { class: "hint" }, "Hover a column heading to see what it counts. Yellow card: 10 minutes in the sin bin. Red card: off for the match and a one-match ban."), statsTable(s, team, render)),
     card("What the ratings mean (0-100, hover a column for the same tip)", h("div", { class: "legend" }, ...ATTRS.flatMap((a) => [h("b", {}, ATTR_INFO[a][0]), h("span", {}, ATTR_INFO[a][1])]))),
     card(
@@ -551,6 +638,34 @@ function fixturesView(s: SeasonState): HTMLElement {
   return wrap;
 }
 
+
+// 12x16 pixel-art players for the league picker. . = empty, h hair, s skin, e eye, j jersey, w stripe, t shorts, b boots
+const SPRITES: Record<Gender, { rows: string[]; pal: Record<string, string> }> = {
+  men: {
+    rows: ["...hhhhhh...", "..hhhhhhhh..", "..hssssssh..", "..ssessess..", "...ssssss...", "....ssss....", ".jjjjjjjjjj.", "ssjjjjjjjjss", "ssjjwwwwjjss", "ssjjjjjjjjss", ".sjjjjjjjjs.", "..tttttttt..", "..tttttttt..", "..ss....ss..", "..ss....ss..", ".bbbb..bbbb."],
+    pal: { h: "#4a3321", s: "#f0c49a", e: "#1a1a1a", j: "#2f8f4e", w: "#e8f5ec", t: "#1d3a28", b: "#0e1a13" },
+  },
+  women: {
+    rows: ["...hhhhhh...", "..hhhhhhhh..", "..hhsssshh..", ".hhsesseshh.", ".hhsssssshh.", ".hh..ss..hh.", ".hjjjjjjjjh.", "ssjjjjjjjjss", "ssjjwwwwjjss", ".sjjjjjjjjs.", "..jjjjjjjj..", "..tttttttt..", ".tttttttttt.", "..ss....ss..", "..ss....ss..", ".bbb....bbb."],
+    pal: { h: "#8a3f2a", s: "#f0c49a", e: "#1a1a1a", j: "#d65a8e", w: "#fdeaf2", t: "#4a2037", b: "#0e1a13" },
+  },
+};
+
+function pixelPlayer(g: Gender): HTMLElement {
+  const { rows, pal } = SPRITES[g];
+  let rects = "";
+  rows.forEach((row, y) => {
+    for (let x = 0; x < 12; x++) {
+      const c = row[x];
+      if (c && c !== ".") rects += `<rect x="${x}" y="${y}" width="1" height="1" fill="${pal[c]}"/>`;
+    }
+  });
+  const el = document.createElement("span");
+  el.className = "sprite";
+  el.innerHTML = `<svg viewBox="0 0 12 16" shape-rendering="crispEdges" aria-hidden="true">${rects}</svg>`;
+  return el;
+}
+
 function pickerView(): HTMLElement {
   const box = h("div", { class: "picker" }, h("h1", {}, "ARENA LEAGUE MANAGER"), h("p", { class: "dim" }, `Dominion: five-a-side rugby for territory, played across Nigeria.  Version ${__APP_VERSION__}`));
   const help = h("button", {}, "How to play");
@@ -563,7 +678,7 @@ function pickerView(): HTMLElement {
       ["women", "Women's league", "The same eight clubs with their own women's squads."],
     ];
     for (const [g, title, blurb] of options) {
-      const b = h("button", { class: "pick" }, h("b", {}, title), h("span", { class: "dim" }, blurb));
+      const b = h("button", { class: "pick" }, pixelPlayer(g), h("div", { class: "txt" }, h("b", {}, title), h("span", { class: "dim" }, blurb)));
       b.onclick = () => {
         pickGender = g;
         render();

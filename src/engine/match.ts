@@ -22,7 +22,7 @@ import type { Attr, EventType, MatchEvent, MatchLog, Player, PlayerLine, Role, S
  */
 export const PHASES = 80;
 export const MAX_SUBS = 3;
-const OUT_OF_POSITION_PENALTY = 5;
+export const OUT_OF_POSITION_PENALTY = 5;
 /** A sin bin lasts 10 minutes = 20 phases. */
 export const BIN_PHASES = 20;
 /** Matches a sent-off player misses. */

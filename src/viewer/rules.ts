@@ -186,6 +186,7 @@ const SECTIONS: Section[] = [
         (Object.values(TACTICS)).map((t) => [t.label, t.description.replace(/\s*(Fewer cards|Hard tackling means more cards|Slightly more cards)\.?$/, ""), `${t.card}x`]),
       ),
       p(b("Attacking is strong, but only for the right side."), " Its bonus depends on the average pace and handling of your starting five: about 62 is neutral, 72 or more gets the full bonus (more metres, fewer errors), and 52 or less is reckless. A side that attacks without those tools makes more mistakes, and when it loses the ball the other side counters, hitting it while the attackers are out of shape. The Squad tab tells you how well your five suits it. AI clubs that cannot play Attacking fall back to Balanced."),
+      p(b("Reading the spider chart."), " On the Squad tab, the Team shape chart plots the six ratings of your starting five (as they will play, out-of-position penalty included) against your next opponent or the league average. A diamond marks the ratings your tactic leans on, so you can see at a glance whether your side is built for it. Select a player to see their own profile against your starting five."),
       h("h4", {}, "Defensive shape"),
       p("Tactic is how ambitious you are. Shape is how your defence stands, and it is how you cover a man down. You can see it on the pitch in highlights: the defensive line, how deep it stands and where the Sweeper is."),
       tbl(["Shape", "What it does"], Object.values(SHAPES).map((sh) => [sh.label, sh.description])),
