@@ -688,7 +688,13 @@ function pickerView(): HTMLElement {
 
 // ------------------------------------------------------------------ shell
 
+/** Scroll offset of the page body, kept across re-renders so clicking a button doesn't jump you to the top. */
+let lastScrollTab: string | null = null;
+
 function render() {
+  const oldMain = app.querySelector("main");
+  const keepScroll = oldMain && lastScrollTab === tab ? oldMain.scrollTop : 0;
+  const keepWin = window.scrollY;
   app.replaceChildren();
   if (live) {
     app.append(live.root);
@@ -729,6 +735,13 @@ function render() {
   app.append(body);
   if (error) app.append(h("div", { class: "err" }, error));
   app.append(h("footer", {}, `Arena League Manager v${__APP_VERSION__}  |  Saved automatically  |  Data: ${dir}`));
+  // Restore scroll after layout; a tab switch (different tab than last render) starts at the top.
+  const sameView = lastScrollTab === tab;
+  lastScrollTab = tab;
+  if (sameView) {
+    body.scrollTop = keepScroll;
+    window.scrollTo(0, keepWin);
+  }
 }
 
 document.addEventListener("keydown", (e) => {
