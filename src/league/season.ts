@@ -1,11 +1,11 @@
 import { hashSeed, Rng } from "../engine/rng";
-import { MatchSim } from "../engine/match";
-import { type Attr, type MatchLog, type TacticId, type Team } from "../engine/types";
+import { MatchSim, RED_BAN } from "../engine/match";
+import { STAT_KEYS, emptyTotals, ROLES, type Attr, type Gender, type MatchLog, type PlayerLine, type PlayerTotals, type Role, type TacticId, type Team } from "../engine/types";
 import { buildSchedule, type Fixture } from "./schedule";
 import { computeStandings, standingsAt } from "./standings";
-import { evolvePlayers, generateTeams } from "./teams";
+import { evolvePlayers, generateTeams, overall } from "./teams";
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 4;
 
 export type TrainingFocus = "attack" | "defence" | "kicking" | "fitness";
 export const TRAINING: Record<TrainingFocus, { label: string; description: string; attrs: Attr[] }> = {
@@ -27,9 +27,14 @@ export interface NewsItem {
   text: string;
 }
 
+/** Career totals include a count of seasons played. */
+export type CareerTotals = PlayerTotals & { seasons: number };
+
 export interface SeasonState {
   version: number;
   seed: number;
+  /** Which league you are coaching in. */
+  gender: Gender;
   season: number;
   managedId: string;
   /** Tactic chosen by the human manager. */
@@ -43,16 +48,28 @@ export interface SeasonState {
   history: SeasonRecord[];
   /** Newest first. */
   news: NewsItem[];
+  /** This season's counting stats by player id (every club). */
+  seasonStats: Record<string, PlayerTotals>;
+  /** Completed seasons, by player id. Add the current season for a full career line. */
+  careerStats: Record<string, CareerTotals>;
 }
 
-export function newGame(seed: number, managedId: string): SeasonState {
-  const teams = generateTeams(seed);
+/** Upgrades a saved season from an older version, or returns null if it cannot be upgraded. */
+export function migrateSave(raw: SeasonState): SeasonState | null {
+  if (raw.version === SAVE_VERSION) return raw;
+  if (raw.version === 3) return { ...raw, version: SAVE_VERSION, seasonStats: {}, careerStats: {} };
+  return null;
+}
+
+export function newGame(seed: number, managedId: string, gender: Gender = "men"): SeasonState {
+  const teams = generateTeams(seed, gender);
   if (!teams.some((t) => t.id === managedId)) throw new Error(`Unknown team ${managedId}`);
   const fixtures = buildSchedule(teams.map((t) => t.id), 1);
   const me = teams.find((t) => t.id === managedId)!;
   return {
     version: SAVE_VERSION,
     seed,
+    gender,
     season: 1,
     managedId,
     tactic: me.style,
@@ -63,6 +80,8 @@ export function newGame(seed: number, managedId: string): SeasonState {
     totalMatchdays: Math.max(...fixtures.map((f) => f.matchday)),
     history: [],
     news: [{ season: 1, matchday: 0, text: `Welcome to ${me.name}. Set your starting five, tactic and training focus, then play your first match.` }],
+    seasonStats: {},
+    careerStats: {},
   };
 }
 
@@ -126,10 +145,91 @@ export function playMatchday(prev: SeasonState, managedLog?: MatchLog): { state:
     news.push(`${verb} ${pf}-${pa} ${home ? "vs" : "at"} ${opp}. ${move}`);
     if (now === 1 && was !== 1) news.push("You have gone top of the table.");
   }
+  news.push(...recordPlayers(state, logs));
   news.push(...train(state, md));
   state.news = [...news.map((text) => ({ season: state.season, matchday: md, text })), ...state.news].slice(0, 14);
   state.matchday++;
   return { state, logs };
+}
+
+/** The player's career: completed seasons plus the current one. */
+export function careerLine(s: SeasonState, id: string): CareerTotals {
+  const total: CareerTotals = { ...emptyTotals(), seasons: 0 };
+  const prior = s.careerStats[id];
+  if (prior) Object.assign(total, prior);
+  const now = s.seasonStats[id];
+  if (now) {
+    for (const k of STAT_KEYS) total[k] += now[k];
+    if (now.apps > 0) total.seasons++;
+  }
+  return total;
+}
+
+export const isSuspended = (p: { ban?: number }) => (p.ban ?? 0) > 0;
+
+/** Best fit for a slot from players who are free to play: same natural role first, then overall rating. */
+export function bestReplacement(team: Team, slot: Role, exclude: Set<string>) {
+  return team.players
+    .filter((p) => !exclude.has(p.id) && !isSuspended(p))
+    .sort((a, b) => Number(b.role === slot) - Number(a.role === slot) || overall(b) - overall(a))[0];
+}
+
+/** One-line description of a player's match for the news and the post-match panel. */
+export function describeLine(l: PlayerLine): string {
+  const bits: string[] = [];
+  if (l.tries) bits.push(`${l.tries} ${l.tries === 1 ? "try" : "tries"}`);
+  const kicks = l.conversions * 2 + l.penaltyGoals * 3 + l.dropGoals * 3;
+  if (kicks) bits.push(`${kicks} from the boot`);
+  if (l.lineBreaks) bits.push(`${l.lineBreaks} line ${l.lineBreaks === 1 ? "break" : "breaks"}`);
+  if (l.tackles >= 4) bits.push(`${l.tackles} tackles`);
+  if (l.turnovers) bits.push(`${l.turnovers} ${l.turnovers === 1 ? "turnover" : "turnovers"} won`);
+  if (l.metres >= 30) bits.push(`${l.metres}m gained`);
+  return bits.join(", ") || `${l.carries} carries, ${l.tackles} tackles`;
+}
+
+/** Roughly how much a player's match mattered, for picking the standout. */
+export const impact = (l: PlayerLine) => l.points + l.tackles * 0.6 + l.metres / 15 + l.lineBreaks * 1.5 + l.turnovers * 2 - l.yellows * 2 - l.reds * 6;
+
+/**
+ * Adds the matchday's player stats to the season, serves bans, and applies new ones.
+ * Bans are decremented before new red cards are applied, so a player sent off on matchday N
+ * misses matchday N+1 and is available again on N+2.
+ */
+function recordPlayers(state: SeasonState, logs: MatchLog[]): string[] {
+  const news: string[] = [];
+  const everyone = new Map(state.teams.flatMap((t) => t.players.map((p) => [p.id, { p, t }] as const)));
+  for (const { p } of everyone.values()) if ((p.ban ?? 0) > 0) p.ban = (p.ban ?? 0) - 1;
+  for (const log of logs) {
+    for (const l of log.players ?? []) {
+      const tot = (state.seasonStats[l.id] ??= emptyTotals());
+      for (const k of STAT_KEYS) tot[k] += l[k];
+      if (l.reds > 0) {
+        const who = everyone.get(l.id);
+        if (who) who.p.ban = RED_BAN;
+      }
+    }
+  }
+  const mine = logs.find((l) => l.homeId === state.managedId || l.awayId === state.managedId);
+  const team = teamById(state, state.managedId);
+  if (mine?.players) {
+    const lines = mine.players.filter((l) => team.players.some((p) => p.id === l.id));
+    const star = [...lines].sort((a, b) => impact(b) - impact(a))[0];
+    if (star && impact(star) > 3) news.push(`Standout: ${star.name} (${describeLine(star)}).`);
+    for (const l of lines) {
+      if (l.reds > 0) news.push(`${l.name} was sent off and is suspended for your next match.`);
+      else if (l.yellows > 0) news.push(`${l.name} spent time in the sin bin.`);
+    }
+  }
+  // Keep the manager's starting five legal: replace any suspended starter with the best available player.
+  for (let i = 0; i < ROLES.length; i++) {
+    const cur = team.players.find((p) => p.id === team.lineup[i]);
+    if (!cur || !isSuspended(cur)) continue;
+    const rep = bestReplacement(team, ROLES[i], new Set(team.lineup));
+    if (!rep) continue;
+    team.lineup[i] = rep.id;
+    news.push(`${cur.name} is suspended, so ${rep.name} comes into the starting five at ${ROLES[i]}.`);
+  }
+  return news;
 }
 
 function ord(n: number): string {
@@ -161,6 +261,12 @@ export function startNextSeason(prev: SeasonState): SeasonState {
   const table = standingsAt(ids, state.fixtures, state.totalMatchdays);
   const finish = table.findIndex((r) => r.teamId === state.managedId) + 1;
   state.history.push({ season: state.season, championId: table[0].teamId, managedPosition: finish });
+  for (const [id, now] of Object.entries(state.seasonStats)) {
+    const career = (state.careerStats[id] ??= { ...emptyTotals(), seasons: 0 });
+    for (const k of STAT_KEYS) career[k] += now[k];
+    if (now.apps > 0) career.seasons++;
+  }
+  state.seasonStats = {};
   state.season++;
   evolvePlayers(state.teams, hashSeed(state.seed, state.season));
   state.fixtures = buildSchedule(ids, state.season);

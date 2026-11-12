@@ -15,12 +15,17 @@ export interface Player {
   tackling: number;
   kicking: number;
   stamina: number;
+  /** Matches still to miss after a red card (0 or missing = available). */
+  ban?: number;
 }
 
 export type TacticId = "balanced" | "attacking" | "defensive" | "territory";
 
+export type Gender = "men" | "women";
+
 export interface Team {
   id: string;
+  gender: Gender;
   name: string;
   short: string;
   /** Style used when the AI manages this club. */
@@ -44,6 +49,9 @@ export type EventType =
   | "penalty"
   | "penalty-goal"
   | "penalty-miss"
+  | "yellow"
+  | "red"
+  | "return"
   | "drop-goal"
   | "drop-miss"
   | "try"
@@ -60,6 +68,10 @@ export interface HighlightCast {
   ai: number;
   /** Main defending player (tackler or interceptor), -1 if none. */
   di: number;
+  /** Lineup slots of attackers who are in the sin bin or sent off, so not on the pitch. */
+  offA?: number[];
+  /** Lineup slots of defenders who are in the sin bin or sent off. */
+  offD?: number[];
 }
 
 export interface MatchEvent {
@@ -87,6 +99,8 @@ export interface MatchEvent {
   /** 0 = home, 1 = away. */
   team?: 0 | 1;
   player?: string;
+  /** Id of the player involved, set for card events. */
+  pid?: string;
   homeScore: number;
   awayScore: number;
 }
@@ -105,6 +119,23 @@ export interface TeamStats {
   conversions: number;
   penaltyGoals: number;
   dropGoals: number;
+  /** Optional so match logs saved before cards existed still load. */
+  yellows?: number;
+  reds?: number;
+}
+
+/** Counting stats for a player, over one match, a season or a career. */
+export const STAT_KEYS = ["apps", "points", "tries", "conversions", "penaltyGoals", "dropGoals", "carries", "metres", "lineBreaks", "tackles", "turnovers", "yellows", "reds"] as const;
+export type StatKey = (typeof STAT_KEYS)[number];
+export type PlayerTotals = Record<StatKey, number>;
+export const emptyTotals = (): PlayerTotals => Object.fromEntries(STAT_KEYS.map((k) => [k, 0])) as PlayerTotals;
+
+/** One player's match: who they were and what they did. */
+export interface PlayerLine extends PlayerTotals {
+  id: string;
+  name: string;
+  /** 0 = home, 1 = away. */
+  team: 0 | 1;
 }
 
 export interface MatchLog {
@@ -123,4 +154,6 @@ export interface MatchLog {
   awayTries: number;
   events: MatchEvent[];
   stats: [TeamStats, TeamStats];
+  /** Per-player match lines. Missing on logs saved before player stats existed. */
+  players?: PlayerLine[];
 }

@@ -6,14 +6,18 @@ Offline management game, text-first with a small 2D arena view for action moment
 
 | Path | Role |
 |---|---|
-| `src/engine/` | Match engine (`match.ts`), seeded RNG, shared types. No DOM, no I/O. |
+| `src/engine/` | Match engine (`match.ts`), commentary (`commentary.ts`), seeded RNG, shared types. No DOM, no I/O. |
 | `src/league/` | Teams, schedule, standings, season flow. Pure functions over a serialisable `SeasonState`. |
-| `src/viewer/` | Table, highlight choreography (`scenes.ts`, pure and unit-tested), canvas renderer (`arena.ts`), live match controller (`live.ts`), stat helpers. |
+| `src/viewer/` | Table, highlight choreography (`scenes.ts`, pure and unit-tested), canvas renderer (`arena.ts`), live match controller (`live.ts`), the in-game rulebook (`rules.ts`), stat helpers. |
 | `src/storage.ts`, `src/main.ts` | Persistence bridge and the app shell. |
 | `src-tauri/src/lib.rs` | Rust commands that save to the app local data dir. |
 | `tests/` | Vitest tests for the engine and league. |
 
 ## The game
+
+The league is Nigerian: Abuja Wardens, Benin Reavers, Calabar Herons, Kano Ironclads, Enugu Stags, Jos Forge, Lagos Corsairs and Ibadan Vanguard. On a new game you choose to coach in the **men's league** or the **women's league** (the same eight clubs, each with their own squads and Nigerian player names; the commentary uses the right pronouns).
+
+**What is generated?** The clubs (names, styles, strength tiers) and the fixture structure are fixed in code. The players (names, ages, ratings) are generated from a random seed each time you start a new game, so every game has different squads and stars. Matches are deterministic from that seed until you intervene.
 
 You manage one club of eight in a 14-matchday season. Between matches you:
 
@@ -35,6 +39,14 @@ Watching opens a live match screen in the style of Football Manager's commentary
 - **Choreographed plays:** attackers stand deep in an echelon, the Pivot distributes, the carrier runs onto the ball, and the defence holds a line with the Sweeper behind. Set plays: crash ball, dummy run (a decoy drags a defender out of position), loop, switch and skip pass. A caption names what is happening.
 - **Controls:** pause, speed 1x/2x/4x/8x, skip to full time, and while paused change tactic, check player energy and make up to 3 substitutions. Touching any of those controls pauses the match and a green **Resume match** button appears at the top of the side panel. At half-time you give a team talk. Continue appears next to the controls and at the top of the side panel at full time.
 
+**Cards.** A penalty can bring a card. A **yellow** sends the player to the sin bin for 10 minutes (the side plays a man down, and the player cannot be substituted). A second yellow in a match is a **red**, and a straight red is also possible: the player is off for the rest of the match and **suspended for the next one**. A man-down side has a gap in its defence and one fewer runner, so the other side scores more (measured: about 2.8x the try rate during a sin-bin window). Risk goes up with a hard-tackling tactic (Defensive 1.5x, Territory 1.25x, Balanced 1x, Attacking 0.8x) and with tired players, and a high tackle is far more likely to be carded than a routine penalty. A side never drops below three on the pitch. The player in the bin or sent off is also removed from the arena animation, and a card chip shows under the pressure bar. A suspended starter on your team is replaced automatically with the best available player and the club news says so; you cannot start a suspended player. On average a balanced match has about 0.6 yellows and 0.09 reds in total.
+
+**Player stats.** Every match records a line per player (apps, points, tries, kicking, carries, metres, line breaks, tackles, turnovers won, cards). The Squad tab shows season and career tables for your club (hover a heading for what it counts), scouting a club shows theirs, the full-time panel names the standout players, and club news names yours.
+
+**Commentary.** Each moment has several phrasings and the narrator avoids repeating one recently; tries mention the scoreboard ("That levels the scores", "take the lead", "time is running out"). The facts the animation shows (which upright, touch, high tackle, tackle count) are in every phrasing. Wording uses its own random stream, so it never changes what happens in a match.
+
+**Rules and help.** The "How to play" button opens a full rulebook with a contents list: the match and clock, possession and the set of six, scoring, how the ball is lost, kicks, penalties, cards, positions and ratings, tactics, how to read the match screen, the season and table, and a glossary. It describes what the engine does, so the text, the numbers and the animations make sense.
+
 Any finished match can be replayed, with its highlights, from the overview or the Fixtures tab. The "How to play" button explains the sport, positions and ratings in plain language.
 
 The League Table has movement arrows (places gained or lost since the previous matchday), a form column, and your club highlighted.
@@ -51,7 +63,7 @@ After each matchday the app writes full match logs first, then the season, to th
 - Windows: `%LOCALAPPDATA%\com.arenaleague.manager\`
 - Linux: `~/.local/share/com.arenaleague.manager/`
 
-Contents: `season.json` and `matches/<fixtureId>.json`. The path is shown in the footer. In a plain browser (`npm run dev` without Tauri) it falls back to localStorage.
+Contents: `season.json` and `matches/<fixtureId>.json`. Saves from version 3 (before player stats and cards) are upgraded on load; older ones are not compatible. The path is shown in the footer. In a plain browser (`npm run dev` without Tauri) it falls back to localStorage.
 
 ## Prerequisites (all platforms)
 
@@ -93,19 +105,20 @@ Tested on macOS 26 (Darwin 25.4), **Intel x86_64** host, Node 22, Rust 1.96.
 
 | Item | Status |
 |---|---|
-| TypeScript tests (`npm test`) | Pass (7 tests: determinism, score and timestamp consistency, balance, highlight counts, a complete choreographed scene for every highlight type, schedule, full season and rollover) |
+| TypeScript tests (`npm test`) | Pass (28 tests). Engine and league: determinism, score consistency, balance, highlight counts, a complete scene for every highlight type, schedule, full season and rollover. Cards: rate, yellow lasts exactly 10 minutes and the player returns, nobody acts while off the pitch, scenes omit carded players, the man-up side scores more, carded players cannot be substituted, defensive tactics get more cards. Suspensions: a red gives a one-match ban, the starter is replaced and the ban clears. Stats: player lines sum to the match and season, career rolls over, version 3 saves upgrade. Commentary: no back-to-back repeats, the animation's facts appear in every phrasing, score context, wording does not change results. |
 | Movement physics | Stepped frame by frame in a browser for every highlight kind: no teleporting (player steps stay within top speed), ball moves continuously (max about 0.5 m per frame). Acceleration spikes only at scripted tackles. |
 | Kick outcomes | All five rendered and checked by eye: good, off the post and in, off the post, wide, short. |
 | Resume button | Driven with a real click in a 560px-high window: appears when the substitution controls are touched, stays after a substitution, resumes the match. |
+| Cards, stats, commentary and rulebook UI | Driven in headless Chromium against the production web build (Playwright): rules dialog opens with all 13 sections and tables fit, Squad tab shows season stats, a watched match shows the sin-bin chip, the 4-on-the-pitch count and a man-down highlight, the full-time panel lists cards and standout players, no page errors. **Not clicked through in the browser:** the SUSPENDED tag, the swap guard and the career toggle (the ban logic and career maths are unit-tested). |
 | Rust tests (`cargo test`) | Pass (2 tests: id sanitising, atomic save round trip) |
 | UI behaviour | Driven end to end in headless Chrome against the production web build: club pick, quick sim, table arrows, lineup swap, tactic/training, live match with substitution, half-time talk, skip, continue, reload restores the season (localStorage backend), replay. No page errors. |
-| macOS x86_64 `.app` and `.dmg` | **Built** and installed from the DMG to `~/Applications`; Mach-O x86_64 |
+| macOS x86_64 `.app` and `.dmg` | Built earlier and installed, but **not rebuilt since cards, stats, the new commentary and the rulebook were added**, so the installed app is out of date. Run `npm run tauri build -- --bundles app,dmg` to refresh it. |
 | macOS arm64 / universal | Not built |
 | Windows (`.exe`/`.msi`) | **Not built, not tested.** Instructions above only |
 | Linux (`.deb`/`.AppImage`) | **Not built, not tested.** Instructions above only |
 | Installed app: close and reopen restores season (Rust file backend) | **Not verified through the GUI.** No accessibility or screen-capture permission was available to click through the installed app. The Rust save/load code is unit-tested; the same UI logic was verified against the localStorage backend. Manual check: pick a club, press `Space` twice, quit, reopen. |
 
-Saves from the first release (version 1) are not compatible; the app tells you and starting a new game overwrites them.
+Saves from earlier builds (before the men's/women's league and Nigerian clubs) are not compatible; the app tells you and starting a new game overwrites them.
 
 ## Future targets
 

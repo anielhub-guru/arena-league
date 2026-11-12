@@ -1,9 +1,10 @@
-import type { MatchLog } from "../engine/types";
+import type { MatchLog, PlayerLine } from "../engine/types";
 import { h } from "../dom";
+import { describeLine, impact } from "../league/season";
 
-/** Scorers list as plain text lines. */
+/** Scorers list as plain text lines, with cards. */
 export function scorerLines(m: MatchLog): string[] {
-  const label: Record<string, string> = { try: "try", conversion: "con", "penalty-goal": "pen", "drop-goal": "drop" };
+  const label: Record<string, string> = { try: "try", conversion: "con", "penalty-goal": "pen", "drop-goal": "drop", yellow: "YELLOW CARD", red: "RED CARD" };
   return m.events
     .filter((e) => e.type in label)
     .map((e) => `${String(e.minute).padStart(2)}'  ${(e.team === 0 ? m.homeName : m.awayName).padEnd(20)} ${e.player} (${label[e.type]})`);
@@ -24,6 +25,8 @@ export function statBars(m: MatchLog): HTMLElement {
     ["Turnovers won", a.turnoversWon, b.turnoversWon],
     ["Errors", a.errors, b.errors],
     ["Penalties conceded", a.penaltiesConceded, b.penaltiesConceded],
+    ["Yellow cards", a.yellows ?? 0, b.yellows ?? 0],
+    ["Red cards", a.reds ?? 0, b.reds ?? 0],
   ];
   const box = h("div", { class: "stats" });
   for (const [label, l, r, unit = ""] of rows) {
@@ -40,4 +43,13 @@ export function statBars(m: MatchLog): HTMLElement {
     bars[1].style.width = `${(r / sum) * 100}%`;
   }
   return box;
+}
+
+/** The best performers of a match, best first, as "Name (Club): what they did". Empty for old logs. */
+export function standoutLines(m: MatchLog, count = 4): string[] {
+  const club = (l: PlayerLine) => (l.team === 0 ? m.homeName : m.awayName);
+  return [...(m.players ?? [])]
+    .sort((a, b) => impact(b) - impact(a))
+    .slice(0, count)
+    .map((l) => `${l.name} (${club(l)}): ${describeLine(l)}`);
 }

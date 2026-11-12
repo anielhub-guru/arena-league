@@ -18,15 +18,22 @@ describe("highlight scenes", () => {
         if (!e.highlight) continue;
         const sc = buildScene(e);
         expect(sc, `${e.type} should build`).not.toBeNull();
+        // Players in the sin bin or sent off are not on the pitch, so they are not in the scene.
+        const offIds = new Set([...(e.cast?.offA ?? []).map((i) => `a${i}`), ...(e.cast?.offD ?? []).map((i) => `d${i}`)]);
+        const on = IDS.filter((id) => !offIds.has(id));
         for (const b of sc!.beats) {
-          for (const id of IDS) {
+          for (const id of on) {
             expect(b.to[id], `${e.type} beat missing ${id}`).toBeDefined();
             expect(Number.isFinite(b.to[id].x) && Number.isFinite(b.to[id].y)).toBe(true);
           }
+          for (const id of offIds) expect(b.to[id], `${e.type} beat should not include off player ${id}`).toBeUndefined();
+          const ball = b.ball;
+          const refs = ball.k === "held" ? [ball.by] : ball.k === "pass" ? [ball.from, ball.to] : ball.k === "fly" && typeof ball.from === "string" ? [ball.from] : [];
+          for (const r of refs) expect(on, `${e.type} ball ref ${r}`).toContain(r);
         }
         for (const b of sc!.beats) for (const h of b.hits ?? []) {
-          expect(IDS, `${e.type} hit runner`).toContain(h.runner);
-          expect(IDS, `${e.type} hit other`).toContain(h.other);
+          expect(on, `${e.type} hit runner`).toContain(h.runner);
+          expect(on, `${e.type} hit other`).toContain(h.other);
         }
         if (/^(conversion|penalty|drop)/.test(e.type)) {
           expect(sc!.kick, `${e.type} should have a kicker's-view`).toBeDefined();

@@ -3,7 +3,7 @@ import { MAX_SUBS, MatchSim, TACTICS, TALKS, type TalkId } from "../engine/match
 import type { EventType, MatchEvent, MatchLog, TacticId, Team } from "../engine/types";
 import { ArenaView } from "./arena";
 import { buildScene } from "./scenes";
-import { scorerLines, statBars } from "./text";
+import { scorerLines, standoutLines, statBars } from "./text";
 
 export interface LiveOptions {
   home: Team;
@@ -15,6 +15,8 @@ export interface LiveOptions {
   managedSide?: 0 | 1;
   /** Called when the user leaves after full time. In live mode the final log is passed. */
   onExit: (log: MatchLog, live: boolean) => void;
+  /** Opens the How to play guide. A live match is paused first. */
+  onHelp?: () => void;
 }
 
 const LABEL: Partial<Record<EventType, string>> = {
@@ -37,6 +39,9 @@ const LABEL: Partial<Record<EventType, string>> = {
   fulltime: "FULL TIME",
   sub: "SUBSTITUTION",
   talk: "TEAM TALK",
+  yellow: "YELLOW CARD",
+  red: "RED CARD",
+  return: "BACK ON",
 };
 
 /** Match seconds that pass per real second at 1x. A full match is 2400 match seconds. */
@@ -81,6 +86,7 @@ export class LiveMatch {
   private cmText = h("div", { class: "cm-text" });
   private pauseBtn = h("button", { class: "primary" }, "Kick off");
   private skipBtn = h("button", {}, "Skip to end");
+  private helpBtn = h("button", { title: "How to play" }, "? Help");
   private speedBtns: HTMLButtonElement[] = [];
   private paused = true;
   private skipping = false;
@@ -94,6 +100,9 @@ export class LiveMatch {
   private replayBatches: MatchEvent[][] = [];
   private replayIdx = 0;
   private talkBox: HTMLElement | null = null;
+  /** Players currently off the pitch, from the events seen so far (works for live matches and replays). */
+  private carded = new Map<string, { name: string; team: string; kind: "bin" | "off" }>();
+  private discipline = h("div", { class: "discipline" });
 
   constructor(opts: LiveOptions) {
     this.opts = opts;
@@ -132,6 +141,12 @@ export class LiveMatch {
     this.resumeBar.append(this.resumeBtn, h("div", { class: "hint" }, "The match is paused while you make changes."));
     this.resumeBar.hidden = true;
     this.skipBtn.onclick = () => this.skip();
+    this.helpBtn.onclick = () => {
+      // Pause a running live match so nothing is missed while reading; Resume stays visible.
+      if (this.opts.sim && !this.done && !this.paused) this.setPaused(true);
+      this.opts.onHelp?.();
+    };
+    this.helpBtn.hidden = !this.opts.onHelp;
     for (const s of [1, 2, 4, 8]) {
       const b = h("button", { class: s === this.speed ? "active" : "" }, `${s}x`);
       b.onclick = () => {
@@ -140,7 +155,7 @@ export class LiveMatch {
       };
       this.speedBtns.push(b);
     }
-    const controls = h("div", { class: "controls" }, this.pauseBtn, h("span", { class: "sp" }, "Speed"), ...this.speedBtns, h("span", { class: "spacer" }), this.skipBtn);
+    const controls = h("div", { class: "controls" }, this.pauseBtn, h("span", { class: "sp" }, "Speed"), ...this.speedBtns, h("span", { class: "spacer" }), this.helpBtn, this.skipBtn);
 
     const scoreboard = h("div", { class: "scoreboard" },
       h("div", { class: "sb-team home" }, home.name),
@@ -160,7 +175,8 @@ export class LiveMatch {
     this.setPressure(0.5, true);
 
     const log = h("details", { class: "logwrap" }, h("summary", {}, "Full match log"), this.feed);
-    const left = h("div", { class: "live-main" }, scoreboard, pressure, this.status, this.stage, controls, log);
+    this.discipline.hidden = true;
+    const left = h("div", { class: "live-main" }, scoreboard, pressure, this.discipline, this.status, this.stage, controls, log);
     if (live) this.manage.classList.add("on");
     // Touching any management control pauses the match.
     this.manage.addEventListener("focusin", () => {
@@ -187,19 +203,24 @@ export class LiveMatch {
     const cond = h("table", { class: "cond" });
     for (const p of side.field) {
       const e = sim.energy(ms, p);
-      cond.append(h("tr", {},
+      const cs = sim.cardState(ms, p);
+      cond.append(h("tr", { class: cs ? "carded" : "" },
         h("td", { class: "r" }, p.role),
         h("td", {}, p.name),
-        h("td", { class: "bar-cell" }, h("div", { class: "energy" }, Object.assign(h("i"), { style: `width:${e}%` }))),
-        h("td", { class: "n" }, `${e}%`)));
+        cs
+          ? h("td", { class: "bar-cell cardcell", colSpan: 2 }, h("span", { class: `card-chip ${cs.kind === "bin" ? "y" : "r"}` }, cs.kind === "bin" ? `SIN BIN ${cs.minutesLeft} min` : "SENT OFF"))
+          : h("td", { class: "bar-cell" }, h("div", { class: "energy" }, Object.assign(h("i"), { style: `width:${e}%` }))),
+        cs ? null : h("td", { class: "n" }, `${e}%`)));
     }
 
     const outSel = h("select");
-    for (const p of side.field) outSel.append(h("option", { value: p.id }, `${p.role}: ${p.name}`));
+    // A player in the sin bin or sent off cannot be substituted.
+    const onPitch = side.field.filter((p) => !sim.cardState(ms, p));
+    for (const p of onPitch) outSel.append(h("option", { value: p.id }, `${p.role}: ${p.name}`));
     const inSel = h("select");
     for (const p of side.bench) inSel.append(h("option", { value: p.id }, `${p.name} (${p.role}, ${Math.round((p.power + p.pace + p.handling + p.tackling + p.kicking + p.stamina) / 6)})`));
     const subBtn = h("button", {}, "Make substitution");
-    subBtn.disabled = side.subs >= MAX_SUBS || side.bench.length === 0;
+    subBtn.disabled = side.subs >= MAX_SUBS || side.bench.length === 0 || onPitch.length === 0;
     subBtn.onclick = () => {
       if (sim.substitute(ms, outSel.value, inSel.value)) {
         for (const ev of sim.drain()) this.reveal(ev);
@@ -210,7 +231,7 @@ export class LiveMatch {
     this.manage.append(
       h("h3", {}, side.team.name),
       h("div", { class: "lbl" }, "Tactic"), tactic, tacticHelp,
-      h("div", { class: "lbl" }, "Energy (tired players play worse)"), cond,
+      h("div", { class: "lbl" }, `Energy (tired players play worse). ${sim.onPitch(ms)} on the pitch`), cond,
       h("div", { class: "lbl" }, `Substitutions (${side.subs}/${MAX_SUBS} used)`),
       outSel, inSel, subBtn,
       h("div", { class: "hint" }, "Opening a control pauses the match. Use the Resume button at the top of this panel when you're done."),
@@ -382,7 +403,23 @@ export class LiveMatch {
     this.logLine(ev, true);
   }
 
+  /** Keeps the card bar in step with the events seen so far. */
+  private track(ev: MatchEvent) {
+    if (ev.pid && ev.player && ev.team !== undefined) {
+      const team = ev.team === 0 ? this.opts.home.short : this.opts.away.short;
+      if (ev.type === "yellow") this.carded.set(ev.pid, { name: ev.player, team, kind: "bin" });
+      else if (ev.type === "red") this.carded.set(ev.pid, { name: ev.player, team, kind: "off" });
+      else if (ev.type === "return") this.carded.delete(ev.pid);
+      else return;
+      this.discipline.replaceChildren(
+        ...[...this.carded.values()].map((c) => h("span", { class: `card-chip ${c.kind === "bin" ? "y" : "r"}`, title: c.kind === "bin" ? "In the sin bin for 10 minutes: this side plays a man down" : "Sent off for the rest of the match, and suspended for the next one" }, `${c.kind === "bin" ? "SIN BIN" : "SENT OFF"}: ${c.name} (${c.team})`)),
+      );
+      this.discipline.hidden = this.carded.size === 0;
+    }
+  }
+
   private logLine(ev: MatchEvent, narrated: boolean) {
+    this.track(ev);
     this.feed.prepend(h("div", { class: `ln t-${ev.type} ${ev.key || narrated ? "key" : ""}` }, h("span", { class: "min" }, `${ev.minute}'`), h("span", { class: "tx" }, ev.text)));
     while (this.feed.childElementCount > 300) this.feed.lastElementChild?.remove();
   }
@@ -451,7 +488,8 @@ export class LiveMatch {
     const exitBtn = h("button", { class: "primary" }, sim ? "Continue" : "Back");
     exitBtn.onclick = exit;
     this.manage.classList.add("on");
-    this.manage.replaceChildren(h("h3", {}, "Full time"), h("div", { class: "exit" }, exitBtn), h("div", { class: "lbl" }, "Scorers"), h("pre", { class: "scorers" }, scorerLines(log).join("\n") || "No scores."), h("div", { class: "lbl" }, "Match stats"), statBars(log));
+    const standout = standoutLines(log);
+    this.manage.replaceChildren(h("h3", {}, "Full time"), h("div", { class: "exit" }, exitBtn), h("div", { class: "lbl" }, "Scorers and cards"), h("pre", { class: "scorers" }, scorerLines(log).join("\n") || "No scores."), ...(standout.length ? [h("div", { class: "lbl" }, "Standout players"), h("pre", { class: "scorers" }, standout.join("\n"))] : []), h("div", { class: "lbl" }, "Match stats"), statBars(log));
     this.root.classList.add("with-manage");
   }
 }

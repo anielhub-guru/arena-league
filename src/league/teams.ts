@@ -1,6 +1,6 @@
 import { Rng, hashSeed } from "../engine/rng";
 import { ATTRS, ROLES } from "../engine/types";
-import type { Attr, Player, Role, TacticId, Team } from "../engine/types";
+import type { Attr, Gender, Player, Role, TacticId, Team } from "../engine/types";
 
 interface TeamDef {
   id: string;
@@ -11,18 +11,19 @@ interface TeamDef {
 }
 
 export const TEAM_DEFS: TeamDef[] = [
-  { id: "ash", name: "Ashford Wardens", short: "ASH", strength: 64, style: "balanced" },
-  { id: "bla", name: "Blackmoor Reavers", short: "BLA", strength: 67, style: "attacking" },
-  { id: "cre", name: "Crestfall Herons", short: "CRE", strength: 60, style: "territory" },
-  { id: "dun", name: "Dunmere Ironclads", short: "DUN", strength: 69, style: "defensive" },
-  { id: "eas", name: "Eastvale Stags", short: "EAS", strength: 62, style: "balanced" },
-  { id: "fen", name: "Fenwick Forge", short: "FEN", strength: 58, style: "attacking" },
-  { id: "gra", name: "Grayhaven Corsairs", short: "GRA", strength: 65, style: "territory" },
-  { id: "hig", name: "Highcliff Vanguard", short: "HIG", strength: 61, style: "defensive" },
+  { id: "ash", name: "Abuja Wardens", short: "ABJ", strength: 64, style: "balanced" },
+  { id: "bla", name: "Benin Reavers", short: "BEN", strength: 67, style: "attacking" },
+  { id: "cre", name: "Calabar Herons", short: "CAL", strength: 60, style: "territory" },
+  { id: "dun", name: "Kano Ironclads", short: "KAN", strength: 69, style: "defensive" },
+  { id: "eas", name: "Enugu Stags", short: "ENU", strength: 62, style: "balanced" },
+  { id: "fen", name: "Jos Forge", short: "JOS", strength: 58, style: "attacking" },
+  { id: "gra", name: "Lagos Corsairs", short: "LAG", strength: 65, style: "territory" },
+  { id: "hig", name: "Ibadan Vanguard", short: "IBA", strength: 61, style: "defensive" },
 ];
 
-const FIRST = ["Tomas", "Rhys", "Callum", "Idris", "Mateo", "Jonah", "Kofi", "Ewan", "Dario", "Silas", "Niall", "Tobias", "Arlo", "Bram", "Cyrus", "Declan", "Felix", "Gideon", "Hamish", "Ivor", "Joss", "Kieran", "Lachlan", "Magnus"];
-const LAST = ["Vance", "Okoro", "Hartley", "Brandt", "Castellan", "Moreau", "Ashdown", "Quill", "Rennick", "Sorrel", "Thackeray", "Underhill", "Voss", "Whitlock", "Yarrow", "Zeller", "Calloway", "Dunmore", "Ellery", "Fairbourne", "Garrick", "Holloway", "Imrie", "Keane"];
+const FIRST_MEN = ["Emeka", "Tunde", "Chidi", "Ibrahim", "Segun", "Kelechi", "Obinna", "Femi", "Musa", "Damilola", "Chinedu", "Yusuf", "Babatunde", "Ikenna", "Abubakar", "Olumide", "Nnamdi", "Sani", "Tobenna", "Kayode", "Uche", "Adebayo", "Ifeanyi", "Bello"];
+const FIRST_WOMEN = ["Ngozi", "Amaka", "Funmi", "Aisha", "Chioma", "Blessing", "Folake", "Zainab", "Adaeze", "Temitope", "Ifeoma", "Hauwa", "Yetunde", "Nkechi", "Bukola", "Fatima", "Chiamaka", "Omolara", "Halima", "Titilayo", "Ebere", "Sade", "Kehinde", "Amina"];
+const LAST = ["Okafor", "Adeyemi", "Balogun", "Eze", "Abubakar", "Okonkwo", "Ogunleye", "Nwosu", "Lawal", "Obi", "Adebisi", "Ibrahim", "Chukwu", "Olawale", "Danjuma", "Uzoma", "Afolabi", "Musa", "Nwachukwu", "Bankole", "Ajayi", "Onyeka", "Salisu", "Oyelaran"];
 
 /** Squad of eight: the first five are the default starters, the last three the bench. */
 const SQUAD_ROLES: Role[] = [...ROLES, "Bruiser", "Winger", "Pivot"];
@@ -37,14 +38,19 @@ const ROLE_BIAS: Record<Role, Partial<Record<Attr, number>>> = {
 
 const clampRating = (v: number) => Math.max(30, Math.min(95, Math.round(v)));
 
-export function generateTeams(seed: number): Team[] {
+/**
+ * Clubs (names, styles, strength tiers) are fixed. Players are generated from the seed, so every
+ * new game has different squads. The men's and women's leagues share the clubs but not the players.
+ */
+export function generateTeams(seed: number, gender: Gender = "men"): Team[] {
   return TEAM_DEFS.map((def) => {
-    const rng = new Rng(hashSeed(seed, def.id));
+    const rng = new Rng(hashSeed(seed, def.id, gender));
+    const firstNames = gender === "women" ? FIRST_WOMEN : FIRST_MEN;
     const used = new Set<string>();
     const players: Player[] = SQUAD_ROLES.map((role, i) => {
       let name: string;
       do {
-        name = `${rng.pick(FIRST)} ${rng.pick(LAST)}`;
+        name = `${rng.pick(firstNames)} ${rng.pick(LAST)}`;
       } while (used.has(name));
       used.add(name);
       const p: Player = { id: `${def.id}-${i + 1}`, name, role, age: rng.int(20, 34), power: 0, pace: 0, handling: 0, tackling: 0, kicking: 0, stamina: 0 };
@@ -52,7 +58,7 @@ export function generateTeams(seed: number): Team[] {
       for (const a of ATTRS) p[a] = clampRating(base + (ROLE_BIAS[role][a] ?? 0) + rng.int(-8, 8));
       return p;
     });
-    return { id: def.id, name: def.name, short: def.short, style: def.style, players, lineup: players.slice(0, 5).map((p) => p.id) };
+    return { id: def.id, gender, name: def.name, short: def.short, style: def.style, players, lineup: players.slice(0, 5).map((p) => p.id) };
   });
 }
 

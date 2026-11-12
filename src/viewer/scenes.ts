@@ -216,7 +216,7 @@ function setPlay(c: Ctx, x0: number): PlayResult {
     const dir = LANE_A[decoy] < 0.5 ? 1 : -1;
     const bi = nearestDef(LANE_A[decoy] + dir * 0.15);
     const toY = LANE_A[decoy] + dir * 0.22;
-    sb.go(750, (p) => { formation(p, bx, 0.5, 2); line(p, bx, 0.5, 8); }, { k: "held", by: A(2) }, { cap: "Dummy run: a decoy sprints across to drag a defender with him" });
+    sb.go(750, (p) => { formation(p, bx, 0.5, 2); line(p, bx, 0.5, 8); }, { k: "held", by: A(2) }, { cap: "Dummy run: a decoy sprints across to drag a defender across" });
     bx += 2;
     sb.go(700, (p) => {
       formation(p, bx, 0.5, 2);
@@ -227,7 +227,7 @@ function setPlay(c: Ctx, x0: number): PlayResult {
     if (ai === 2) {
       // The Pivot keeps it and goes through the hole.
       const by = clamp(0.5 - dir * 0.14, 0.25, 0.75);
-      sb.go(550, (p) => { formation(p, bx, by, 2); p[A(decoy)] = { x: bx + 3, y: toY }; line(p, bx, by, 6, { i: bi, toY: toY + dir * 0.06 }); }, { k: "held", by: A(2) }, { cap: "He keeps the ball and steps into the gap" });
+      sb.go(550, (p) => { formation(p, bx, by, 2); p[A(decoy)] = { x: bx + 3, y: toY }; line(p, bx, by, 6, { i: bi, toY: toY + dir * 0.06 }); }, { k: "held", by: A(2) }, { cap: "The Pivot keeps the ball and steps into the gap" });
       return { bx, by, bite: { i: bi, toY: toY + dir * 0.06 }, name: "Dummy" };
     }
     const y = LANE_A[ai];
@@ -235,7 +235,7 @@ function setPlay(c: Ctx, x0: number): PlayResult {
       formation(p, bx, y, ai);
       p[A(decoy)] = { x: bx + 3, y: toY };
       line(p, bx, y, 6, { i: bi, toY: toY + dir * 0.06 });
-    }, { k: "pass", from: A(2), to: a, arc: 6 }, { cap: "Pass goes behind the decoy, into the space he created" });
+    }, { k: "pass", from: A(2), to: a, arc: 6 }, { cap: "Pass goes behind the decoy, into the space the decoy created" });
     return { bx, by: y, bite: { i: bi, toY: toY + dir * 0.06 }, name: "Dummy" };
   }
 
@@ -346,8 +346,69 @@ function trySceneEnd(c: Ctx, cid: string, did: string, ty: number) {
   );
 }
 
-/** Builds the choreography for a highlight event, or null if the event is not animated. */
+/**
+ * Builds the choreography for a highlight event, or null if the event is not animated.
+ * Players in the sin bin or sent off are not on the pitch, so they are left out of the scene.
+ */
 export function buildScene(ev: MatchEvent): Scene | null {
+  const scene = buildFullScene(ev);
+  const cast = ev.cast;
+  if (!scene || !cast || (!cast.offA?.length && !cast.offD?.length)) return scene;
+  return withoutOffPlayers(scene, [...(cast.offA ?? []).map(A), ...(cast.offD ?? []).map(D)]);
+}
+
+/** Removes the given players (ids like "d4") and hands anything they were doing to a teammate. */
+function withoutOffPlayers(sc: Scene, offIds: string[]): Scene {
+  const off = new Set(offIds);
+  const standIn = (id: string): string => {
+    if (!off.has(id)) return id;
+    for (let i = 0; i < 5; i++) if (!off.has(`${id[0]}${i}`)) return `${id[0]}${i}`;
+    return id;
+  };
+  const surnameOfOff = new Map<string, string>();
+  for (const id of off) {
+    const names = id[0] === "a" ? sc.names.a : sc.names.d;
+    const sub = names[Number(id[1])];
+    const repl = names[Number(standIn(id)[1])];
+    if (sub && repl) surnameOfOff.set(surname(sub), surname(repl));
+  }
+  // Captions that name a role must not mention a player who is not on the pitch.
+  const gone = (slot: number) => off.has(A(slot)) || off.has(D(slot));
+  const fixCap = (t: string) => {
+    let out = t;
+    if (gone(4)) out = out.replace(/The Sweeper/g, "A covering player").replace(/the Sweeper/g, "a covering player");
+    if (gone(2)) out = out.replace(/The Pivot/g, "A runner").replace(/the Pivot/g, "a runner");
+    if (gone(3)) out = out.replace(/the winger/g, "a runner");
+    return out;
+  };
+  const keep = (m: Record<string, Pt>) => Object.fromEntries(Object.entries(m).filter(([id]) => !off.has(id)));
+  const ball = (b: Ball): Ball => {
+    if (b.k === "held") return { k: "held", by: standIn(b.by) };
+    if (b.k === "pass") {
+      const from = standIn(b.from);
+      const to = standIn(b.to);
+      return from === to ? { k: "held", by: from } : { ...b, from, to };
+    }
+    if (b.k === "fly") return { ...b, from: typeof b.from === "string" ? standIn(b.from) : b.from };
+    return b;
+  };
+  return {
+    ...sc,
+    init: keep(sc.init),
+    initBall: ball(sc.initBall),
+    beats: sc.beats.map((b) => ({
+      ...b,
+      to: keep(b.to),
+      ball: ball(b.ball),
+      cap: b.cap === undefined ? undefined : fixCap(b.cap),
+      banner: b.banner ? { ...b.banner, sub: b.banner.sub === undefined ? undefined : (surnameOfOff.get(b.banner.sub) ?? b.banner.sub), text: b.banner.text } : undefined,
+      fx: b.fx && typeof b.fx.at === "string" ? { ...b.fx, at: standIn(b.fx.at) } : b.fx,
+      hits: b.hits?.map((h) => ({ ...h, runner: standIn(h.runner), other: standIn(h.other) })).filter((h) => h.runner !== h.other),
+    })),
+  };
+}
+
+function buildFullScene(ev: MatchEvent): Scene | null {
   if (!ev.highlight || !ev.cast || ev.att === undefined) return null;
   const att = ev.att;
   const toU = (x: number) => (att === 0 ? x : 100 - x);
@@ -378,7 +439,7 @@ export function buildScene(ev: MatchEvent): Scene | null {
         formation(q, 97.4, ty, ai);
         line(q, 97.4, ty, 3);
         q[did] = { x: 97.9, y: ty + 0.02 };
-      }, { k: "held", by: cid }, { hits: [{ kind: "tackle", runner: cid, other: did, result: "through", at: 0.2 }], cap: "Big hit, but he drives straight through the tackle" });
+      }, { k: "held", by: cid }, { hits: [{ kind: "tackle", runner: cid, other: did, result: "through", at: 0.2 }], cap: "Big hit, but the runner drives straight through the tackle" });
     }
     trySceneEnd(c, cid, did, ty);
   } else if (type === "break") {
@@ -414,7 +475,7 @@ export function buildScene(ev: MatchEvent): Scene | null {
         formation(q, end, y, ai);
         for (let i = 0; i < 5; i++) q[D(i)] = { x: end - 3.5 - i * 1.7, y: lerp(LANE_D[i], y, 0.6) };
         q[did] = { x: end + 0.9, y: y + 0.02 };
-      }, { k: "held", by: cid }, { banner: { text: "HIGH TACKLE!", color: RED, sub: surname(names.d[di]) }, cap: "Caught around the neck. The referee is blowing his whistle.", hits: [{ kind: "tackle", runner: cid, other: did, result: "down", at: 0.3 }] });
+      }, { k: "held", by: cid }, { banner: { text: "HIGH TACKLE!", color: RED, sub: surname(names.d[di]) }, cap: "Caught around the neck. The referee is blowing the whistle.", hits: [{ kind: "tackle", runner: cid, other: did, result: "down", at: 0.3 }] });
       sb.go(1000, (q) => {
         for (let i = 0; i < 5; i++) if (D(i) !== did) q[D(i)] = { x: end + 8 + i * 0.6, y: LANE_D[i] };
       }, { k: "held", by: cid }, { banner: { text: "PENALTY!", color: AMBER, sub: "Defence retreats 10 metres" }, cap: "Penalty to the attackers", fx: { kind: "ring", at: did, color: RED } });
@@ -446,7 +507,7 @@ export function buildScene(ev: MatchEvent): Scene | null {
     }, { k: "held", by: cid }, { hits: [{ kind: "tackle", runner: cid, other: did, result: "down", at: 0.3 }], cap: "Wrapped up and put on the floor" });
     sb.go(800, (q) => {
       q[did] = { x: end + 1.4, y: p.by };
-    }, { k: "fly", from: cid, to: { x: end + 1.4, y: p.by }, arc: 12 }, { banner: { text: "TURNOVER!", color: AMBER, sub: ev.player }, cap: "Jackal! He gets over the ball and rips it free" });
+    }, { k: "fly", from: cid, to: { x: end + 1.4, y: p.by }, arc: 12 }, { banner: { text: "TURNOVER!", color: AMBER, sub: ev.player }, cap: "Jackal! The tackler gets over the ball and rips it free" });
     sb.go(900, (q) => {
       q[did] = { x: end - 2, y: p.by + 0.1 };
       for (let i = 0; i < 5; i++) if (D(i) !== did) q[D(i)] = { x: end - 1 + i * 0.8, y: LANE_D[i] };
@@ -456,7 +517,7 @@ export function buildScene(ev: MatchEvent): Scene | null {
     const ball = { x: p.bx + 4, y: clamp(p.by + (r(4) - 0.5) * 0.2, 0.15, 0.85) };
     sb.go(700, (q) => {
       q[did] = { x: p.bx + 5, y: p.by };
-    }, { k: "fly", from: cid, to: ball, arc: 14 }, { banner: { text: "KNOCK-ON!", color: RED, sub: ev.player }, cap: "It slips out of his hands and goes forward" });
+    }, { k: "fly", from: cid, to: ball, arc: 14 }, { banner: { text: "KNOCK-ON!", color: RED, sub: ev.player }, cap: "It slips out of the carrier's hands and goes forward" });
     sb.go(750, (q) => {
       q[did] = { ...ball };
     }, { k: "held", by: did }, { cap: "The defence scoops it up" });
@@ -472,7 +533,7 @@ export function buildScene(ev: MatchEvent): Scene | null {
       formation(q, p.bx, p.by, ai);
       q[A(ai)] = { x: p.bx + 1, y: p.by };
       q[did] = { ...lane };
-    }, { k: "pass", from: fromId, to: did, arc: 6 }, { banner: { text: "INTERCEPTED!", color: RED, sub: ev.player }, cap: "He read it all the way and jumped the pass" });
+    }, { k: "pass", from: fromId, to: did, arc: 6 }, { banner: { text: "INTERCEPTED!", color: RED, sub: ev.player }, cap: "A perfectly read pass: the defender jumps it" });
     const end = clamp(u1, 4, p.bx - 4);
     const ms = clamp(500 + (lane.x - end) * MS_PER_M, 900, 2600);
     sb.go(ms, (q) => {
@@ -485,7 +546,7 @@ export function buildScene(ev: MatchEvent): Scene | null {
     }, { k: "held", by: did }, { cap: "Counter attack! The Sweeper is the last man back." });
     sb.go(700, (q) => {
       q[A(4)] = { x: end + 0.7, y: lane.y + 0.1 };
-    }, { k: "held", by: did }, { hits: [{ kind: "tackle", runner: did, other: A(4), result: "down", at: 0.3 }], cap: "The Sweeper finally brings him down" });
+    }, { k: "held", by: did }, { hits: [{ kind: "tackle", runner: did, other: A(4), result: "down", at: 0.3 }], cap: "The Sweeper finally brings the runner down" });
   } else if (type === "kick") {
     const kid = A(ai);
     initBall = { k: "held", by: A(2) };
@@ -520,7 +581,7 @@ export function buildScene(ev: MatchEvent): Scene | null {
       sb.go(1000, (q) => {
         q[A(1)] = { x: land.x - 1.2, y: 0.55 };
         q[A(3)] = { x: land.x - 3.5, y: 0.7 };
-      }, { k: "held", by: D(4) }, { hits: [{ kind: "tackle", runner: D(4), other: A(1), result: "down", at: 0.3 }], cap: "Flattened by the chaser the moment he lands" });
+      }, { k: "held", by: D(4) }, { hits: [{ kind: "tackle", runner: D(4), other: A(1), result: "down", at: 0.3 }], cap: "Flattened by the chaser the moment the ball lands" });
     }
   } else if (
     type === "conversion" || type === "conversion-miss" || type === "penalty-goal" || type === "penalty-miss" || type === "drop-goal" || type === "drop-miss"

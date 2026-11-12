@@ -619,6 +619,7 @@ export class ArenaView {
     const dirSign = att === 0 ? 1 : -1;
     const drawAgent = (id: string, col: string) => {
       const a = sim.agents[id];
+      if (!a) return; // in the sin bin or sent off: not on the pitch
       const speed = Math.hypot(a.vx, a.vy);
       if (speed > 5 && a.down <= 0) {
         a.trail.forEach((p, i) => {
@@ -634,23 +635,33 @@ export class ArenaView {
       const y = fy(a.y);
       const hx = a.hx * dirSign;
       if (a.down > 0) {
-        const angle = Math.atan2(a.hy, hx);
-        ctx.fillStyle = "#00000066";
+        // Down after contact: the same round body, dimmed with a dashed outline and dizzy dots,
+        // so players never change shape.
+        ctx.fillStyle = "#00000044";
         ctx.beginPath();
-        ctx.ellipse(x + 1, y + R * 0.4, R * 1.5, R * 0.7, angle, 0, Math.PI * 2);
+        ctx.ellipse(x + 1.5, y + R * 0.55, R, R * 0.5, 0, 0, Math.PI * 2);
         ctx.fill();
+        ctx.globalAlpha = 0.5;
         ctx.fillStyle = col;
-        ctx.globalAlpha = 0.85;
         ctx.beginPath();
-        ctx.ellipse(x, y, R * 1.4, R * 0.68, angle, 0, Math.PI * 2);
+        ctx.arc(x, y, R, 0, Math.PI * 2);
         ctx.fill();
         ctx.globalAlpha = 1;
-        ctx.strokeStyle = "#0b100e";
+        ctx.setLineDash([3, 3]);
+        ctx.strokeStyle = "#ffffff";
         ctx.lineWidth = 1.5;
         ctx.stroke();
+        ctx.setLineDash([]);
         ctx.fillStyle = "#0b100e";
-        ctx.font = `bold ${Math.round(R * 0.8)}px ui-monospace, Menlo, Consolas, monospace`;
-        ctx.fillText(ROLE_LETTER[Number(id[1])], x, y + R * 0.28);
+        ctx.font = `bold ${Math.round(R)}px ui-monospace, Menlo, Consolas, monospace`;
+        ctx.fillText(ROLE_LETTER[Number(id[1])], x, y + R * 0.35);
+        ctx.fillStyle = "#ffffff";
+        for (let i = 0; i < 3; i++) {
+          const ang = sim.t / 140 + i * 2.1;
+          ctx.beginPath();
+          ctx.arc(x + Math.cos(ang) * R * 0.9, y - R * 1.25 + Math.sin(ang) * R * 0.28, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
         return;
       }
       const lean = Math.min(1, speed / 20);

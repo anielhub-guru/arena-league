@@ -1,12 +1,14 @@
 import { h } from "./dom";
-import { ATTRS, ROLES, type MatchLog, type Player, type TacticId, type Team } from "./engine/types";
+import { ATTRS, ROLES, type Gender, type MatchLog, type Player, type TacticId, type Team } from "./engine/types";
 import { TACTICS, slotPlayer } from "./engine/match";
 import {
-  SAVE_VERSION,
   TRAINING,
   buildSim,
+  careerLine,
   isSeasonOver,
+  isSuspended,
   managedFixture,
+  migrateSave,
   newGame,
   playMatchday,
   startNextSeason,
@@ -18,6 +20,7 @@ import { computeStandings, teamForm } from "./league/standings";
 import { TEAM_DEFS, generateTeams, overall, teamRating } from "./league/teams";
 import * as store from "./storage";
 import { LiveMatch } from "./viewer/live";
+import { buildRules } from "./viewer/rules";
 import { buildTable } from "./viewer/table";
 
 type Tab = "overview" | "squad" | "table" | "fixtures";
@@ -33,6 +36,8 @@ let tab: Tab = "overview";
 let busy = false;
 let live: LiveMatch | null = null;
 let selectedPlayer: string | null = null;
+/** Which stats the Squad tab shows. */
+let statsMode: "season" | "career" = "season";
 let dir = "";
 let error = "";
 
@@ -51,28 +56,7 @@ const ATTR_INFO: Record<(typeof ATTRS)[number], [string, string]> = {
 };
 
 function showRules() {
-  const close = h("button", {}, "Close");
-  close.onclick = () => rulesDialog.close();
-  rulesDialog.replaceChildren(
-    h("h2", {}, "How to play"),
-    h("h3", {}, "The sport"),
-    h("p", {}, "Dominion is five-a-side rugby on a 100m arena. There are only two ways to score. First, carry the ball over the other team's line and ground it for a TRY (5 points). Throwing or passing the ball into the end zone does NOT score. Second, kick it over the crossbar and between the posts: a CONVERSION after a try (+2), a PENALTY kick (3), or a DROP GOAL in open play (3)."),
-    h("h3", {}, "Kicks at goal"),
-    h("p", {}, "Every kick at goal cuts to a view from behind the kicker. A score goes between the uprights and over the bar, and flags go up. A miss can drift wide, drop short, or hit the post and bounce away. Occasionally one clips the post and still goes over."),
-    h("h3", {}, "Possession"),
-    h("p", {}, "The team with the ball can run it, pass it sideways or backwards (forward passes are not allowed), or kick it downfield to win territory. The ball is lost if the carrier is tackled six times, drops it forward (a KNOCK-ON), has a pass INTERCEPTED, has it stolen in the tackle (a TURNOVER), or is forced into touch (out of play, line-out to the other side). A high tackle gives away a penalty."),
-    h("h3", {}, "The five positions"),
-    h("ul", {},
-      h("li", {}, "Anchor and Bruiser: heavy runners who crash into the defence."),
-      h("li", {}, "Pivot: the playmaker. Distributes the ball and usually kicks."),
-      h("li", {}, "Winger: fast finisher on the outside."),
-      h("li", {}, "Sweeper: the last defender. Covers line breaks and catches kicks.")),
-    h("h3", {}, "Highlights"),
-    h("p", {}, "Most of a match is read as commentary. Big moments (tries, line breaks, kicks at goal, long kicks, interceptions, turnovers, costly knock-ons) switch to a top-down view. Look for set plays: the dummy run (a decoy drags a defender out), the loop, the switch, the crash ball and the long skip pass. Letters on the dots are positions: A, B, P, W, S."),
-    h("h3", {}, "What you control"),
-    h("p", {}, "Your starting five, your tactic, your training focus, and during a watched match: tactic changes, substitutions and the half-time team talk."),
-    h("div", { class: "toolbar" }, close),
-  );
+  rulesDialog.replaceChildren(buildRules(() => rulesDialog.close()));
   rulesDialog.showModal();
 }
 
@@ -99,11 +83,16 @@ async function guarded(fn: () => Promise<void>) {
   }
 }
 
+/** League chosen on the new-game screen (null until picked). */
+let pickGender: Gender | null = null;
+
 const startNew = (teamId: string) =>
   guarded(async () => {
+    if (!pickGender) return;
+    // Clubs are fixed; players are generated from this random seed, so every new game differs.
     const seed = (crypto.getRandomValues(new Uint32Array(1))[0] || 1) >>> 0;
     await store.resetSave();
-    await persist(newGame(seed, teamId));
+    await persist(newGame(seed, teamId, pickGender));
     tab = "overview";
   });
 
@@ -135,6 +124,7 @@ function watchMatch() {
   const sim = buildSim(s, f);
   const managedSide = f.homeId === s.managedId ? 0 : 1;
   live = new LiveMatch({
+    onHelp: showRules,
     home: teamById(s, f.homeId),
     away: teamById(s, f.awayId),
     sim,
@@ -162,6 +152,7 @@ function replayMatch(id: string) {
     const log = await store.readMatchLog(id);
     if (!log) throw new Error("Match log not found on disk.");
     live = new LiveMatch({
+    onHelp: showRules,
       home: teamById(s, log.homeId),
       away: teamById(s, log.awayId),
       log,
@@ -184,6 +175,20 @@ const update = (mut: (s: SeasonState) => void) => {
 
 /** Swap two squad members: lineup <-> lineup swaps slots, lineup <-> bench replaces the starter. */
 function swapPlayers(a: string, b: string) {
+  const team0 = state ? teamById(state, state.managedId) : null;
+  if (team0) {
+    // Whoever comes off the bench into the starting five must be free to play.
+    const inA = team0.lineup.includes(a);
+    const inB = team0.lineup.includes(b);
+    const entering = inA && !inB ? b : inB && !inA ? a : null;
+    const player = entering ? team0.players.find((x) => x.id === entering) : null;
+    if (player && isSuspended(player)) {
+      error = `${player.name} is suspended and cannot start the next match.`;
+      render();
+      return;
+    }
+  }
+  error = "";
   void update((s) => {
     const team = teamById(s, s.managedId);
     const ia = team.lineup.indexOf(a);
@@ -197,6 +202,7 @@ function swapPlayers(a: string, b: string) {
 function newGameFlow() {
   if (!window.confirm("Abandon this save and start a new game?")) return;
   state = null;
+  pickGender = null;
   render();
 }
 
@@ -225,7 +231,7 @@ function playerTable(team: Team, opts: { selectable?: boolean } = {}): HTMLEleme
     const shown = oop ? slotPlayer(p, slot as Player["role"]) : p;
     const tr = h("tr", { class: `${slot === "Bench" ? "bench" : "starter"} ${selectedPlayer === p.id ? "sel" : ""}` },
       h("td", { class: "slot" }, slot),
-      h("td", { class: "club" }, p.name, oop ? h("span", { class: "oop", title: "Out of position: -5 to every attribute" }, " ⚠ -5") : null),
+      h("td", { class: "club" }, p.name, oop ? h("span", { class: "oop", title: "Out of position: -5 to every attribute" }, " ⚠ -5") : null, isSuspended(p) ? h("span", { class: "card-chip r", title: "Sent off in the last match: misses the next one" }, "SUSPENDED") : null),
       h("td", {}, p.role),
       h("td", {}, String(p.age)),
       ...ATTRS.map((a) => h("td", { class: shown[a] < p[a] ? "dn" : "" }, String(shown[a]))),
@@ -250,6 +256,47 @@ function playerTable(team: Team, opts: { selectable?: boolean } = {}): HTMLEleme
   return t;
 }
 
+/** Season or career stats for a squad, with a toggle. */
+function statsTable(s: SeasonState, team: Team, rerender: () => void): HTMLElement {
+  const cols: [string, string, string][] = [
+    ["Apps", "apps", "Matches played"],
+    ["Pts", "points", "Points scored (tries 5, conversions 2, penalty goals 3, drop goals 3)"],
+    ["Tries", "tries", "Tries scored"],
+    ["Kick pts", "kick", "Points from conversions, penalty goals and drop goals"],
+    ["Carries", "carries", "Times carrying the ball into contact"],
+    ["Metres", "metres", "Metres gained carrying the ball"],
+    ["Breaks", "lineBreaks", "Line breaks"],
+    ["Tackles", "tackles", "Tackles made"],
+    ["Turnovers", "turnovers", "Turnovers won (jackals and interceptions)"],
+    ["YC", "yellows", "Yellow cards (10 minutes in the sin bin)"],
+    ["RC", "reds", "Red cards (sent off and suspended for a match)"],
+  ];
+  const season = statsMode === "season";
+  const toggle = h("div", { class: "toolbar" });
+  for (const m of ["season", "career"] as const) {
+    const btn = h("button", { class: statsMode === m ? "active" : "" }, m === "season" ? `Season ${s.season}` : "Career");
+    btn.onclick = () => {
+      statsMode = m;
+      rerender();
+    };
+    toggle.append(btn);
+  }
+  const t = h("table", { class: "squad stats" });
+  t.append(h("thead", {}, h("tr", {}, h("th", { class: "club" }, "Player"), ...(season ? [] : [h("th", { title: "Seasons played, including this one" }, "Seasons")]), ...cols.map(([c, , tipText]) => h("th", { title: tipText }, c)))));
+  const body = h("tbody");
+  for (const p of team.players) {
+    const tot = season ? (s.seasonStats[p.id] ?? null) : careerLine(s, p.id);
+    const get = (k: string): number => {
+      if (!tot) return 0;
+      if (k === "kick") return tot.conversions * 2 + tot.penaltyGoals * 3 + tot.dropGoals * 3;
+      return (tot as unknown as Record<string, number>)[k] ?? 0;
+    };
+    body.append(h("tr", {}, h("td", { class: "club" }, p.name), ...(season ? [] : [h("td", {}, String(careerLine(s, p.id).seasons))]), ...cols.map(([, k]) => h("td", { class: k === "yellows" && get(k) ? "yc" : k === "reds" && get(k) ? "rc" : "" }, String(get(k))))));
+  }
+  t.append(body);
+  return h("div", {}, toggle, t);
+}
+
 function scout(s: SeasonState, id: string) {
   const team = teamById(s, id);
   const close = h("button", {}, "Close");
@@ -258,9 +305,11 @@ function scout(s: SeasonState, id: string) {
     h("h2", {}, team.name),
     h("div", { class: "dim" }, `Rating ${teamRating(team)}  |  Usual style: ${TACTICS[team.style].label}  |  Form: `, formChips(s, id)),
     playerTable(team),
+    h("h3", { class: "sub" }, "Stats"),
+    statsTable(s, team, () => scout(s, id)),
     h("div", { class: "toolbar" }, close),
   );
-  scoutDialog.showModal();
+  if (!scoutDialog.open) scoutDialog.showModal();
 }
 
 function card(title: string, ...kids: (Node | string)[]): HTMLElement {
@@ -339,6 +388,7 @@ function squadView(s: SeasonState): HTMLElement {
   }
   return h("div", { class: "col" },
     card(`${team.name} - starting five & bench`, h("div", { class: "hint" }, hint), playerTable(team, { selectable: true })),
+    card("Player stats", h("div", { class: "hint" }, "Hover a column heading to see what it counts. Yellow card: 10 minutes in the sin bin. Red card: off for the match and a one-match ban."), statsTable(s, team, render)),
     card("What the ratings mean (0-100, hover a column for the same tip)", h("div", { class: "legend" }, ...ATTRS.flatMap((a) => [h("b", {}, ATTR_INFO[a][0]), h("span", {}, ATTR_INFO[a][1])]))),
     h("div", { class: "grid" },
       card("Your tactic", tactics),
@@ -369,17 +419,42 @@ function fixturesView(s: SeasonState): HTMLElement {
 }
 
 function pickerView(): HTMLElement {
-  const teams = generateTeams(1);
-  const box = h("div", { class: "picker" }, h("h1", {}, "ARENA LEAGUE MANAGER"), h("p", { class: "dim" }, "Dominion: five-a-side rugby for territory. Choose the club you will manage for the season."));
+  const box = h("div", { class: "picker" }, h("h1", {}, "ARENA LEAGUE MANAGER"), h("p", { class: "dim" }, "Dominion: five-a-side rugby for territory, played across Nigeria."));
+  const help = h("button", {}, "How to play");
+  help.onclick = showRules;
+
+  if (!pickGender) {
+    box.append(h("p", {}, "Which league will you coach?"));
+    const options: [Gender, string, string][] = [
+      ["men", "Men's league", "Eight clubs, men's squads."],
+      ["women", "Women's league", "The same eight clubs with their own women's squads."],
+    ];
+    for (const [g, title, blurb] of options) {
+      const b = h("button", { class: "pick" }, h("b", {}, title), h("span", { class: "dim" }, blurb));
+      b.onclick = () => {
+        pickGender = g;
+        render();
+      };
+      box.append(b);
+    }
+    box.append(h("p", { class: "dim" }, "The clubs are fixed. The players are generated fresh every time you start a new game, so each game has different squads and stars."), help);
+    return box;
+  }
+
+  const teams = generateTeams(1, pickGender);
+  const back = h("button", {}, "← Change league");
+  back.onclick = () => {
+    pickGender = null;
+    render();
+  };
+  box.append(h("p", {}, pickGender === "women" ? "Women's league: choose your club" : "Men's league: choose your club"));
   for (const def of TEAM_DEFS) {
     const t = teams.find((x) => x.id === def.id)!;
     const b = h("button", { class: "pick" }, h("b", {}, def.name), h("span", { class: "dim" }, `Style: ${TACTICS[def.style].label}   Rating ~${teamRating(t)}`));
     b.onclick = () => void startNew(def.id);
     box.append(b);
   }
-  const help = h("button", {}, "How to play");
-  help.onclick = showRules;
-  box.append(h("p", { class: "dim" }, "Ratings are indicative; squads are generated when you start."), help);
+  box.append(h("p", { class: "dim" }, "Ratings are indicative: the club's strength is fixed, but its players are generated when you start."), h("div", { class: "toolbar" }, back, help));
   return box;
 }
 
@@ -416,7 +491,7 @@ function render() {
   newBtn.onclick = newGameFlow;
   const helpBtn = h("button", {}, "How to play");
   helpBtn.onclick = showRules;
-  app.append(h("header", {}, h("h1", {}, "ARENA LEAGUE"), nav, h("span", { class: "spacer" }), h("span", { class: "dim" }, `${teamById(s, s.managedId).name} | Season ${s.season}`), watch, quick, helpBtn, newBtn));
+  app.append(h("header", {}, h("h1", {}, "ARENA LEAGUE"), nav, h("span", { class: "spacer" }), h("span", { class: "dim" }, `${teamById(s, s.managedId).name} | ${s.gender === "women" ? "Women's" : "Men's"} League | Season ${s.season}`), watch, quick, helpBtn, newBtn));
 
   const body = h("main");
   if (tab === "overview") body.append(overviewView(s));
@@ -460,13 +535,23 @@ async function boot() {
     const raw = await store.loadSave();
     if (raw) {
       const parsed = JSON.parse(raw) as SeasonState;
-      if (parsed.version !== SAVE_VERSION) throw new Error(`save is from an older version (${parsed.version}); this build needs version ${SAVE_VERSION}`);
-      state = parsed;
+      const upgraded = migrateSave(parsed);
+      if (!upgraded) throw new Error(`save is from an older version (${parsed.version}) that this build cannot upgrade`);
+      state = upgraded;
     }
   } catch (e) {
     error = `Could not read saved season (${e instanceof Error ? e.message : String(e)}). Picking a club will start a new game and overwrite it.`;
   }
   render();
+  // First launch: show the guide once so a new player can learn the sport before picking a club.
+  try {
+    if (!state && !localStorage.getItem("arena:help-seen")) {
+      localStorage.setItem("arena:help-seen", "1");
+      showRules();
+    }
+  } catch {
+    /* storage unavailable: skip the prompt */
+  }
 }
 
 void boot();

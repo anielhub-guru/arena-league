@@ -69,6 +69,26 @@ describe("highlights", () => {
   });
 });
 
+describe("leagues", () => {
+  it("has Nigerian clubs and separate men's and women's squads", () => {
+    const men = generateTeams(5, "men");
+    const women = generateTeams(5, "women");
+    expect(men.map((t) => t.name)).toContain("Lagos Corsairs");
+    expect(men.map((t) => t.name)).toContain("Abuja Wardens");
+    expect(men.map((t) => t.name)).toEqual(women.map((t) => t.name));
+    expect(women.every((t) => t.gender === "women")).toBe(true);
+    expect(men[0].players.map((p) => p.name)).not.toEqual(women[0].players.map((p) => p.name));
+    for (const t of [...men, ...women]) expect(new Set(t.players.map((p) => p.name)).size).toBe(8);
+  });
+  it("uses the right pronoun in women's commentary", () => {
+    const w = generateTeams(7, "women");
+    let text = "";
+    for (let n = 0; n < 60; n++) text += simulateMatch({ id: "w", season: 1, matchday: 1, home: w[0], away: w[1], homeTactic: "attacking", awayTactic: "attacking", seed: n }).events.map((e) => e.text).join(" ");
+    expect(text).not.toMatch(/\bhim\b/);
+    expect(text).toMatch(/\bher\b/);
+  });
+});
+
 describe("league", () => {
   it("schedules a valid double round robin", () => {
     const ids = teams.map((t) => t.id);
