@@ -5,11 +5,13 @@ import { describeLine, impact, playerOfTheMatch } from "./awards";
 import { buildSchedule, type Fixture } from "./schedule";
 import { computeStandings, standingsAt } from "./standings";
 import { MATCH_PAY, MAX_BUYS, MONEY_START, fmtMoney, playerValue, prizeFor, sellPrice, teenSalePrice, wageOf } from "./economy";
-import { evolvePlayers, generateTeams, initialPotential, makeProspects, overall } from "./teams";
+import { RESERVE_COUNT, evolvePlayers, generateTeams, makeReserves, initialPotential, makeProspects, overall } from "./teams";
 
 export { describeLine, impact };
 
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;
+/** Five starters, three bench, two reserves. */
+export const SQUAD_SIZE = 10;
 
 export type TrainingFocus = "attack" | "defence" | "kicking" | "fitness";
 export const TRAINING: Record<TrainingFocus, { label: string; description: string; attrs: Attr[] }> = {
@@ -100,6 +102,16 @@ export function migrateSave(raw: SeasonState): SeasonState | null {
     s.version = 5;
   }
   if (s.version === 5) s = { ...s, version: 6, money: MONEY_START };
+  if (s.version === 6) {
+    // Older squads had eight players: add two reserves to every club.
+    s = structuredClone(s);
+    for (const t of s.teams) {
+      const add = makeReserves(t, s.seed);
+      t.players.push(...add);
+      t.reserves = add.map((p) => p.id);
+    }
+    s.version = 7;
+  }
   if (s.version !== SAVE_VERSION) return null;
   return { ...s, shape: s.shape ?? "sweeper" };
 }
@@ -267,14 +279,34 @@ function applyLoad(state: SeasonState, logs: MatchLog[]) {
  * counted (it costs stat points at kickoff and drains stamina faster), so a worn-out low-stamina starter
  * sits when the bench is close in quality, and a high-stamina one plays on.
  */
+const slotScore = (p: Player, slot: Role) => {
+  const eff = overall(slotPlayer(p, slot));
+  const t = (p.tired ?? 0) / 100;
+  // A natural fit keeps its place unless tiredness really bites.
+  return eff * (1 - t * 0.15) - t * 8 + (p.role === slot ? 3 : 0);
+};
+
+/**
+ * Picks the best squad from current form: starters by fit and freshness, then the three best of the
+ * rest on the bench and the remaining two as reserves. Suspended players go last, to the reserves.
+ */
+export function autoSelect(team: Team): { lineup: string[]; reserves: string[] } {
+  const used = new Set<string>();
+  const lineup = ROLES.map((slot) => {
+    const pool = team.players.filter((p) => !used.has(p.id));
+    const best = pool.filter((p) => !isSuspended(p)).sort((a, b) => slotScore(b, slot) - slotScore(a, slot))[0] ?? pool[0];
+    used.add(best.id);
+    return best.id;
+  });
+  const rest = team.players
+    .filter((p) => !used.has(p.id))
+    .sort((a, b) => Number(isSuspended(a)) - Number(isSuspended(b)) || overall(b) * (1 - (b.tired ?? 0) / 700) - overall(a) * (1 - (a.tired ?? 0) / 700));
+  return { lineup, reserves: rest.slice(rest.length - RESERVE_COUNT).map((p) => p.id) };
+}
+
 export function aiRest(club: Team) {
-  const score = (p: Player, slot: Role) => {
-    const eff = overall(slotPlayer(p, slot));
-    const t = (p.tired ?? 0) / 100;
-    // A natural fit keeps its place unless tiredness really bites.
-    return eff * (1 - t * 0.15) - t * 8 + (p.role === slot ? 3 : 0);
-  };
-  const free = club.players.filter((p) => !isSuspended(p));
+  const score = slotScore;
+  const free = club.players.filter((p) => !isSuspended(p) && !club.reserves?.includes(p.id));
   const used = new Set<string>();
   const next = ROLES.map((slot, i) => {
     const pick = free.filter((p) => !used.has(p.id)).sort((a, b) => score(b, slot) - score(a, slot))[0];
@@ -290,7 +322,7 @@ export const isSuspended = (p: { ban?: number }) => (p.ban ?? 0) > 0;
 /** Best fit for a slot from players who are free to play: same natural role first, then overall rating. */
 export function bestReplacement(team: Team, slot: Role, exclude: Set<string>) {
   return team.players
-    .filter((p) => !exclude.has(p.id) && !isSuspended(p))
+    .filter((p) => !exclude.has(p.id) && !isSuspended(p) && !team.reserves?.includes(p.id))
     .sort((a, b) => Number(b.role === slot) - Number(a.role === slot) || overall(b) - overall(a))[0];
 }
 
@@ -454,12 +486,13 @@ function replacePlayer(team: Team, oldId: string, next: Player) {
   if (i < 0) throw new Error(`Unknown player ${oldId}`);
   team.players[i] = next;
   team.lineup = team.lineup.map((id) => (id === oldId ? next.id : id));
+  if (team.reserves) team.reserves = team.reserves.map((id) => (id === oldId ? next.id : id));
 }
 
 export interface PlanCheck {
   ok: boolean;
   problems: string[];
-  /** Squad size after the plan. It must be eight. */
+  /** Squad size after the plan. It must be SQUAD_SIZE. */
   size: number;
   sellIncome: number;
   teenIncome: number;
@@ -484,7 +517,7 @@ export function checkPlan(s: SeasonState, plan: OffseasonPlan): PlanCheck {
   if (signed.some((x) => !x) || bought.some((x) => !x)) problems.push("Someone you chose is no longer on offer.");
   const roster = [...keep, ...signed.filter((x): x is Player => !!x), ...bought.filter((x): x is Listing => !!x).map((l) => l.player)];
   if (plan.buy.length > MAX_BUYS) problems.push(`You can make at most ${MAX_BUYS} transfer signings per offseason.`);
-  if (roster.length !== 8) problems.push(`Your squad must have 8 players (it would have ${roster.length}).`);
+  if (roster.length !== SQUAD_SIZE) problems.push(`Your squad must have ${SQUAD_SIZE} players (it would have ${roster.length}).`);
   for (const role of ROLES) if (!roster.some((p) => p.role === role)) problems.push(`You need at least one natural ${role}.`);
   const sellIncome = team.players.filter((p) => sell.has(p.id)).reduce((t, p) => t + sellPrice(p), 0);
   const unsigned = intake.prospects.filter((p) => !plan.sign.includes(p.id));
@@ -577,6 +610,13 @@ export function completeOffseason(prev: SeasonState, plan: OffseasonPlan): Seaso
     used.add(rep.id);
     return rep.id;
   });
+  // Reserves who left are gone; top up to two with the weakest players outside the starting five.
+  team.reserves = (team.reserves ?? []).filter((id) => team.players.some((p) => p.id === id));
+  while (team.reserves.length < RESERVE_COUNT) {
+    const next = team.players.filter((p) => !team.lineup.includes(p.id) && !team.reserves!.includes(p.id)).sort((a, b) => overall(a) - overall(b))[0];
+    if (!next) break;
+    team.reserves.push(next.id);
+  }
   state.money = check.moneyAfter;
   delete state.intake;
   state.news = [...news.map((text) => ({ season: state.season, matchday: 0, text })), ...state.news].slice(0, 14);

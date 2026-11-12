@@ -40,8 +40,10 @@ export interface Team {
   short: string;
   /** Style used when the AI manages this club. */
   style: TacticId;
-  /** Full squad of eight. */
+  /** Full squad of ten: five starters, three on the bench and two reserves. */
   players: Player[];
+  /** Ids of the two reserves. They are outside the matchday eight and can only be swapped in between matches. */
+  reserves?: string[];
   /** Ids of the starting five, in ROLES slot order. */
   lineup: string[];
 }

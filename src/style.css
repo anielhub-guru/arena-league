@@ -348,3 +348,5 @@ td.stars { color: #e3cf7a; letter-spacing: 1px; white-space: nowrap; }
 .r-table tr.on th, .r-table tr.on td { font-weight: 700; }
 .r-table td { font-variant-numeric: tabular-nums; }
 td.club.link { cursor: pointer; text-decoration: underline dotted var(--dim); text-underline-offset: 3px; }
+
+.playclock { position: fixed; right: 10px; bottom: 6px; z-index: 50; font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; background: var(--bg, #0d1117); padding: 2px 8px; border-radius: 4px; pointer-events: none; }

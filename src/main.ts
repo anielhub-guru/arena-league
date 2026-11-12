@@ -19,9 +19,11 @@ import {
   type SeasonState,
   type TrainingFocus,
   autoPlan,
+  autoSelect,
   checkPlan,
   completeOffseason,
   type OffseasonPlan,
+  SQUAD_SIZE,
 } from "./league/season";
 import { computeStandings, teamForm } from "./league/standings";
 import { TEAM_DEFS, generateTeams, overall, potentialStars, teamRating } from "./league/teams";
@@ -137,6 +139,12 @@ function watchMatch() {
     away: teamById(s, f.awayId),
     sim,
     managedSide,
+    onBack: () => {
+      // Nothing is saved until full time, so leaving just drops the unplayed match.
+      live?.dispose();
+      live = null;
+      render();
+    },
     onExit: (log) => {
       live?.dispose();
       live = null;
@@ -204,6 +212,13 @@ function swapPlayers(a: string, b: string) {
     if (ia >= 0 && ib >= 0) [team.lineup[ia], team.lineup[ib]] = [team.lineup[ib], team.lineup[ia]];
     else if (ia >= 0) team.lineup[ia] = b;
     else if (ib >= 0) team.lineup[ib] = a;
+    // Reserves are the two spots outside the matchday eight: whoever swaps with one takes its place.
+    const res = (team.reserves ??= []);
+    const ra = res.indexOf(a);
+    const rb = res.indexOf(b);
+    if (ra >= 0 && rb >= 0) [res[ra], res[rb]] = [res[rb], res[ra]];
+    else if (ra >= 0) res[ra] = b;
+    else if (rb >= 0) res[rb] = a;
   });
 }
 
@@ -233,12 +248,13 @@ function playerTable(team: Team, opts: { selectable?: boolean } = {}): HTMLEleme
   const body = h("tbody");
   const rows: [string, Player][] = [
     ...team.lineup.map((id, i) => [ROLES[i], team.players.find((p) => p.id === id)!] as [string, Player]),
-    ...team.players.filter((p) => !team.lineup.includes(p.id)).map((p) => ["Bench", p] as [string, Player]),
+    ...team.players.filter((p) => !team.lineup.includes(p.id) && !team.reserves?.includes(p.id)).map((p) => ["Bench", p] as [string, Player]),
+    ...team.players.filter((p) => team.reserves?.includes(p.id)).map((p) => ["Reserve", p] as [string, Player]),
   ];
   for (const [slot, p] of rows) {
-    const oop = slot !== "Bench" && p.role !== slot;
+    const oop = slot !== "Bench" && slot !== "Reserve" && p.role !== slot;
     const shown = oop ? slotPlayer(p, slot as Player["role"]) : p;
-    const tr = h("tr", { class: `${slot === "Bench" ? "bench" : "starter"} ${selectedPlayer === p.id ? "sel" : ""}` },
+    const tr = h("tr", { class: `${slot === "Bench" || slot === "Reserve" ? "bench" : "starter"} ${selectedPlayer === p.id ? "sel" : ""}` },
       h("td", { class: "slot" }, slot),
       h("td", { class: "club" }, p.name, oop ? h("span", { class: "oop", title: "Out of position: -5 to every attribute" }, " ⚠ -5") : null, isSuspended(p) ? h("span", { class: "card-chip r", title: "Sent off in the last match: misses the next one" }, "SUSPENDED") : null, (p.tired ?? 0) >= 8 ? h("span", { class: "oop", title: `Tired from recent matches (${Math.round(p.tired!)}/100): starts the match slightly weaker and tires faster. High stamina recovers quicker. Rest a player to freshen them.` }, (p.tired ?? 0) >= 20 ? " ● Tired" : " ● Weary") : null, p.retiring ? h("span", { class: "card-chip r", title: "Retires when you confirm your offseason signings" }, "RETIRING") : null),
       h("td", {}, p.role),
@@ -451,10 +467,10 @@ function offseasonCard(s: SeasonState): HTMLElement {
   };
   const money = (label: string, v: number, sign = "") => h("span", { class: "dim" }, `${label} ${sign}${fmtMoney(v)}   `);
   const summary = h("div", { class: "advice" },
-    h("b", {}, `Squad ${check.size}/8   `), money("Balance now", s.money), money("Unpicked prospects sold", check.teenIncome, "+"), money("Sales", check.sellIncome, "+"), money("Purchases", check.buyCost, "-"), h("b", {}, `Balance after ${fmtMoney(check.moneyAfter)}`));
+    h("b", {}, `Squad ${check.size}/${SQUAD_SIZE}   `), money("Balance now", s.money), money("Unpicked prospects sold", check.teenIncome, "+"), money("Sales", check.sellIncome, "+"), money("Purchases", check.buyCost, "-"), h("b", {}, `Balance after ${fmtMoney(check.moneyAfter)}`));
   return card(
     `Season ${s.season}: offseason`,
-    h("p", { class: "dim" }, "Everything here is optional except refilling the squad to eight. Retirees leave, young prospects grow toward a potential you can only estimate, and prospects you do not sign are sold for income. Other clubs' players on the transfer list are priced by what they are really worth, so a good eye finds a bargain and a bad one finds a trap."),
+    h("p", { class: "dim" }, "Everything here is optional except refilling the squad to ten (five starters, three on the bench and two reserves). Retirees leave, young prospects grow toward a potential you can only estimate, and prospects you do not sign are sold for income. Other clubs' players on the transfer list are priced by what they are really worth, so a good eye finds a bargain and a bad one finds a trap."),
     summary,
     ...(check.problems.length ? [h("div", { class: "err" }, check.problems.join(" "))] : []),
     ...radarBlocks(),
@@ -525,7 +541,19 @@ function squadView(s: SeasonState): HTMLElement {
   const team = teamById(s, s.managedId);
   const hint = selectedPlayer
     ? "Now click another player to swap places with them (or click the same player to cancel)."
-    : "Click a player, then click another, to swap them. Starters fill the five slots in order; bench players can replace any starter.";
+    : "Click a player, then click another, to swap them. Starters fill the five slots in order; bench players can replace any starter. The two reserves are outside the matchday eight: swap one in here between matches.";
+
+  const autoBtn = h("button", { title: "Pick the best starters, bench and reserves from current ratings, tiredness and suspensions" }, "Auto select team");
+  autoBtn.onclick = () => {
+    selectedPlayer = null;
+    error = "";
+    void update((x) => {
+      const t = teamById(x, x.managedId);
+      const pick = autoSelect(t);
+      t.lineup = pick.lineup;
+      t.reserves = pick.reserves;
+    });
+  };
 
   const starters = team.lineup.map((id, i) => slotPlayer(team.players.find((p) => p.id === id)!, ROLES[i]));
   const fit = attackFit(starters);
@@ -601,7 +629,7 @@ function squadView(s: SeasonState): HTMLElement {
     training.append(b);
   }
   return h("div", { class: "col" },
-    card(`${team.name} - starting five & bench`, h("div", { class: "hint" }, hint), playerTable(team, { selectable: true })),
+    card(`${team.name} - starting five, bench & reserves`, h("div", { class: "toolbar" }, autoBtn), h("div", { class: "hint" }, hint), playerTable(team, { selectable: true })),
     ...(profileCard ? [profileCard] : []),
     shapeCard,
     card("Player stats", h("div", { class: "hint" }, "Hover a column heading to see what it counts. Yellow card: 10 minutes in the sin bin. Red card: off for the match and a one-match ban."), statsTable(s, team, render)),
@@ -795,4 +823,40 @@ async function boot() {
   }
 }
 
+// ------------------------------------------------------------------ play-time clock
+
+/** Real time spent in the game: this session and the running total across sessions, bottom-right. */
+function startPlayClock() {
+  const KEY = "arena:play-ms";
+  let saved = 0;
+  try {
+    saved = Number(localStorage.getItem(KEY)) || 0;
+  } catch {
+    /* storage unavailable: the total restarts each session */
+  }
+  let session = 0;
+  let last = Date.now();
+  const el = h("div", { class: "playclock", title: "Real time you have spent playing" });
+  document.body.append(el);
+  const fmt = (ms: number) => {
+    const mins = Math.floor(ms / 60000);
+    return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, "0")}m`;
+  };
+  const tick = () => {
+    const now = Date.now();
+    // Only count while the window is visible; ignore huge gaps (sleep).
+    if (!document.hidden) session += Math.min(now - last, 5000);
+    last = now;
+    el.textContent = `⏱ Session ${fmt(session)}  |  Total ${fmt(saved + session)}`;
+    try {
+      localStorage.setItem(KEY, String(saved + session));
+    } catch {
+      /* ignore */
+    }
+  };
+  tick();
+  window.setInterval(tick, 5000);
+}
+
+startPlayClock();
 void boot();

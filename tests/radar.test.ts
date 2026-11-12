@@ -40,7 +40,7 @@ describe("radar data", () => {
       if (!s.intake!.retiring.length) s = completeOffseason(s, autoPlan(s));
     }
     const c = checkPlan(s, autoPlan(s));
-    expect(c.roster).toHaveLength(8);
+    expect(c.roster).toHaveLength(10);
     expect(c.roster.some((p) => s.intake!.retiring.includes(p.id))).toBe(false);
     expect(bestFive(c.roster)).toHaveLength(5);
   });

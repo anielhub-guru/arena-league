@@ -78,7 +78,7 @@ describe("leagues", () => {
     expect(men.map((t) => t.name)).toEqual(women.map((t) => t.name));
     expect(women.every((t) => t.gender === "women")).toBe(true);
     expect(men[0].players.map((p) => p.name)).not.toEqual(women[0].players.map((p) => p.name));
-    for (const t of [...men, ...women]) expect(new Set(t.players.map((p) => p.name)).size).toBe(8);
+    for (const t of [...men, ...women]) expect(new Set(t.players.map((p) => p.name)).size).toBe(10);
   });
   it("uses the right pronoun in women's commentary", () => {
     const w = generateTeams(7, "women");

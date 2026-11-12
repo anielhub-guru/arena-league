@@ -23,6 +23,8 @@ export interface LiveOptions {
   managedSide?: 0 | 1;
   /** Called when the user leaves after full time. In live mode the final log is passed. */
   onExit: (log: MatchLog, live: boolean) => void;
+  /** Live mode: leave before full time without playing the match. */
+  onBack?: () => void;
   /** Opens the How to play guide. A live match is paused first. */
   onHelp?: () => void;
 }
@@ -92,6 +94,7 @@ export class LiveMatch {
   private stage = h("div", { class: "stage" });
   private cmTag = h("div", { class: "cm-tag" });
   private cmText = h("div", { class: "cm-text" });
+  private backBtn = h("button", {}, "← Back");
   private pauseBtn = h("button", { class: "primary" }, "Kick off");
   private skipBtn = h("button", {}, "Skip to end");
   private helpBtn = h("button", { title: "How to play" }, "? Help");
@@ -162,7 +165,13 @@ export class LiveMatch {
       };
       this.speedBtns.push(b);
     }
-    const controls = h("div", { class: "controls" }, this.pauseBtn, h("span", { class: "sp" }, "Speed"), ...this.speedBtns, h("span", { class: "spacer" }), this.helpBtn, this.skipBtn);
+    this.backBtn.onclick = () => {
+      // Once play has started, the result is lost, so ask first.
+      if (this.started && !this.done && !window.confirm("Leave this match? It has not finished and will not be counted. You can watch it again from the start.")) return;
+      this.opts.onBack?.();
+    };
+    this.backBtn.hidden = !this.opts.onBack;
+    const controls = h("div", { class: "controls" }, this.backBtn, this.pauseBtn, h("span", { class: "sp" }, "Speed"), ...this.speedBtns, h("span", { class: "spacer" }), this.helpBtn, this.skipBtn);
 
     const scoreboard = h("div", { class: "scoreboard" },
       tint(h("div", { class: "sb-team home" }, home.name), teamColor(home.id)),
@@ -532,6 +541,7 @@ export class LiveMatch {
     this.cmText = fresh;
     this.status.textContent = "The match is over.";
     this.skipBtn.disabled = true;
+    this.backBtn.hidden = true;
     const exit = () => this.opts.onExit(log, !!sim);
     this.pauseBtn.disabled = false;
     this.pauseBtn.textContent = sim ? "Continue ▶" : "Back";

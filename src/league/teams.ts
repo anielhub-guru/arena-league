@@ -32,8 +32,9 @@ const FIRST_MEN = ["Emeka", "Tunde", "Chidi", "Ibrahim", "Segun", "Kelechi", "Ob
 const FIRST_WOMEN = ["Ngozi", "Amaka", "Funmi", "Aisha", "Chioma", "Blessing", "Folake", "Zainab", "Adaeze", "Temitope", "Ifeoma", "Hauwa", "Yetunde", "Nkechi", "Bukola", "Fatima", "Chiamaka", "Omolara", "Halima", "Titilayo", "Ebere", "Sade", "Kehinde", "Amina"];
 const LAST = ["Okafor", "Adeyemi", "Balogun", "Eze", "Abubakar", "Okonkwo", "Ogunleye", "Nwosu", "Lawal", "Obi", "Adebisi", "Ibrahim", "Chukwu", "Olawale", "Danjuma", "Uzoma", "Afolabi", "Musa", "Nwachukwu", "Bankole", "Ajayi", "Onyeka", "Salisu", "Oyelaran"];
 
-/** Squad of eight: the first five are the default starters, the last three the bench. */
-const SQUAD_ROLES: Role[] = [...ROLES, "Bruiser", "Winger", "Pivot"];
+/** Squad of ten: the first five are the default starters, then three on the bench, then two reserves. */
+const SQUAD_ROLES: Role[] = [...ROLES, "Bruiser", "Winger", "Pivot", "Sweeper", "Winger"];
+export const RESERVE_COUNT = 2;
 
 const ROLE_BIAS: Record<Role, Partial<Record<Attr, number>>> = {
   Anchor: { power: 10, tackling: 6, pace: -8 },
@@ -74,11 +75,11 @@ export function generateTeams(seed: number, gender: Gender = "men"): Team[] {
         name = `${rng.pick(firstNames)} ${rng.pick(LAST)}`;
       } while (used.has(name));
       used.add(name);
-      const p = buildPlayer(rng, `${def.id}-${i + 1}`, name, role, rng.int(20, 34), def.strength - (i >= 5 ? 5 : 0));
+      const p = buildPlayer(rng, `${def.id}-${i + 1}`, name, role, rng.int(20, 34), def.strength - (i >= 8 ? 8 : i >= 5 ? 5 : 0));
       p.potential = initialPotential(p, new Rng(hashSeed(seed, p.id, "pot")));
       return p;
     });
-    return { id: def.id, gender, name: def.name, short: def.short, style: def.style, players, lineup: players.slice(0, 5).map((p) => p.id) };
+    return { id: def.id, gender, name: def.name, short: def.short, style: def.style, players, lineup: players.slice(0, 5).map((p) => p.id), reserves: players.slice(8).map((p) => p.id) };
   });
 }
 
@@ -110,6 +111,23 @@ export function evolvePlayers(teams: Team[], seed: number): Map<string, Player[]
     }
   }
   return retired;
+}
+
+/** Two reserves for a club saved before reserves existed. Deterministic from the save seed. */
+export function makeReserves(team: Team, seed: number): Player[] {
+  const rng = new Rng(hashSeed(seed, team.id, "reserves"));
+  const strength = TEAM_DEFS.find((d) => d.id === team.id)?.strength ?? 62;
+  const firstNames = team.gender === "women" ? FIRST_WOMEN : FIRST_MEN;
+  const taken = new Set(team.players.map((p) => p.name));
+  return (["Sweeper", "Winger"] as const).slice(0, RESERVE_COUNT).map((role, k) => {
+    let name: string;
+    do name = `${rng.pick(firstNames)} ${rng.pick(LAST)}`;
+    while (taken.has(name));
+    taken.add(name);
+    const p = buildPlayer(rng, `${team.id}-r${k + 1}`, name, role, rng.int(18, 30), strength - 8);
+    p.potential = initialPotential(p, new Rng(hashSeed(seed, p.id, "pot")));
+    return p;
+  });
 }
 
 /** Young prospects for a vacancy. Their true potential is hidden behind a noisy `scouted` value. */
