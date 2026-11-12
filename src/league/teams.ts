@@ -8,18 +8,23 @@ interface TeamDef {
   short: string;
   strength: number;
   style: TacticId;
+  /** Club colour, used for the pressure bar, scoreboard and arena dots. */
+  color: string;
 }
 
 export const TEAM_DEFS: TeamDef[] = [
-  { id: "ash", name: "Abuja Wardens", short: "ABJ", strength: 64, style: "balanced" },
-  { id: "bla", name: "Benin Reavers", short: "BEN", strength: 67, style: "attacking" },
-  { id: "cre", name: "Calabar Herons", short: "CAL", strength: 60, style: "territory" },
-  { id: "dun", name: "Kano Ironclads", short: "KAN", strength: 69, style: "defensive" },
-  { id: "eas", name: "Enugu Stags", short: "ENU", strength: 62, style: "balanced" },
-  { id: "fen", name: "Jos Forge", short: "JOS", strength: 58, style: "attacking" },
-  { id: "gra", name: "Lagos Corsairs", short: "LAG", strength: 65, style: "territory" },
-  { id: "hig", name: "Ibadan Vanguard", short: "IBA", strength: 61, style: "defensive" },
+  { id: "ash", name: "Abuja Wardens", short: "ABJ", strength: 64, style: "balanced", color: "#e3cf7a" },
+  { id: "bla", name: "Benin Reavers", short: "BEN", strength: 67, style: "attacking", color: "#f0897a" },
+  { id: "cre", name: "Calabar Herons", short: "CAL", strength: 60, style: "territory", color: "#b7a4e0" },
+  { id: "dun", name: "Kano Ironclads", short: "KAN", strength: 69, style: "defensive", color: "#b8c7c0" },
+  { id: "eas", name: "Enugu Stags", short: "ENU", strength: 62, style: "balanced", color: "#8fe3a6" },
+  { id: "fen", name: "Jos Forge", short: "JOS", strength: 58, style: "attacking", color: "#f0b35a" },
+  { id: "gra", name: "Lagos Corsairs", short: "LAG", strength: 65, style: "territory", color: "#7fb6e0" },
+  { id: "hig", name: "Ibadan Vanguard", short: "IBA", strength: 61, style: "defensive", color: "#e58fb4" },
 ];
+
+/** Club colour by team id (falls back to the old home/away colours). */
+export const teamColor = (id: string, fallback = "#8fe3a6") => TEAM_DEFS.find((d) => d.id === id)?.color ?? fallback;
 
 const FIRST_MEN = ["Emeka", "Tunde", "Chidi", "Ibrahim", "Segun", "Kelechi", "Obinna", "Femi", "Musa", "Damilola", "Chinedu", "Yusuf", "Babatunde", "Ikenna", "Abubakar", "Olumide", "Nnamdi", "Sani", "Tobenna", "Kayode", "Uche", "Adebayo", "Ifeanyi", "Bello"];
 const FIRST_WOMEN = ["Ngozi", "Amaka", "Funmi", "Aisha", "Chioma", "Blessing", "Folake", "Zainab", "Adaeze", "Temitope", "Ifeoma", "Hauwa", "Yetunde", "Nkechi", "Bukola", "Fatima", "Chiamaka", "Omolara", "Halima", "Titilayo", "Ebere", "Sade", "Kehinde", "Amina"];

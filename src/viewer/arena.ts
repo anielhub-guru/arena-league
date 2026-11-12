@@ -19,8 +19,6 @@ import { sceneMs, type Ball, type Hit, type KickView, type Scene } from "./scene
  *
  * Units are metres: x along the pitch (attacker's frame), y across (lane * 40m), z up.
  */
-const HOME = "#8fe3a6";
-const AWAY = "#f0b35a";
 const ROLE_LETTER = ["A", "B", "P", "W", "S"];
 const VIEW_M = 46;
 const WIDTH_M = 40;
@@ -120,7 +118,7 @@ export class ArenaView {
   private resolve: (() => void) | null = null;
   private rate: () => number = () => 1;
 
-  constructor(private homeShort: string, private awayShort: string) {
+  constructor(private homeShort: string, private awayShort: string, private homeCol = "#8fe3a6", private awayCol = "#f0b35a") {
     this.canvas = document.createElement("canvas");
     this.canvas.className = "arena";
     this.ctx = this.canvas.getContext("2d")!;
@@ -551,8 +549,8 @@ export class ArenaView {
     const bottom = h - 14;
     const fy = (metres: number) => lerp(top + 18, bottom - 14, metres / WIDTH_M);
     const att = s.att;
-    const aCol = att === 0 ? HOME : AWAY;
-    const dCol = att === 0 ? AWAY : HOME;
+    const aCol = att === 0 ? this.homeCol : this.awayCol;
+    const dCol = att === 0 ? this.awayCol : this.homeCol;
     const R = Math.max(7, Math.min(13, px * 0.6));
 
     // Camera shake from big tackles.
@@ -584,7 +582,7 @@ export class ArenaView {
     ctx.stroke();
     ctx.textAlign = "center";
     ctx.font = "bold 14px ui-monospace, Menlo, Consolas, monospace";
-    for (const [m, txt, col] of [[-4, this.homeShort, HOME], [104, this.awayShort, AWAY]] as const) {
+    for (const [m, txt, col] of [[-4, this.homeShort, this.homeCol], [104, this.awayShort, this.awayCol]] as const) {
       ctx.save();
       ctx.translate(fx(m), (top + bottom) / 2);
       ctx.rotate(-Math.PI / 2);

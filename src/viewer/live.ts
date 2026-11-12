@@ -4,7 +4,14 @@ import type { EventType, MatchEvent, MatchLog, ShapeId, TacticId, Team } from ".
 import { ArenaView } from "./arena";
 import { buildScene } from "./scenes";
 import { scorerLines, standoutLines, statBars } from "./text";
+import { teamColor } from "../league/teams";
 import { describeLine, playerOfTheMatch, teamBest } from "../league/awards";
+
+/** Sets an element's text colour and returns it. */
+const tint = <T extends HTMLElement>(el: T, color: string): T => {
+  el.style.color = color;
+  return el;
+};
 
 export interface LiveOptions {
   home: Team;
@@ -97,7 +104,6 @@ export class LiveMatch {
   private started = false;
   private speed = 1;
   private wake: (() => void) | null = null;
-  private perspective: 0 | 1 = 0;
   private replayBatches: MatchEvent[][] = [];
   private replayIdx = 0;
   private talkBox: HTMLElement | null = null;
@@ -108,8 +114,7 @@ export class LiveMatch {
 
   constructor(opts: LiveOptions) {
     this.opts = opts;
-    this.perspective = opts.managedSide ?? 0;
-    this.arena = new ArenaView(opts.home.short, opts.away.short);
+    this.arena = new ArenaView(opts.home.short, opts.away.short, teamColor(opts.home.id), teamColor(opts.away.id, "#f0b35a"));
     if (opts.log) {
       const byStep = new Map<number, MatchEvent[]>();
       for (const e of opts.log.events) byStep.set(e.step, [...(byStep.get(e.step) ?? []), e]);
@@ -160,20 +165,22 @@ export class LiveMatch {
     const controls = h("div", { class: "controls" }, this.pauseBtn, h("span", { class: "sp" }, "Speed"), ...this.speedBtns, h("span", { class: "spacer" }), this.helpBtn, this.skipBtn);
 
     const scoreboard = h("div", { class: "scoreboard" },
-      h("div", { class: "sb-team home" }, home.name),
+      tint(h("div", { class: "sb-team home" }, home.name), teamColor(home.id)),
       h("div", { class: "sb-mid" }, this.score, this.clock, h("div", { class: "sb-bar" }, this.progress)),
-      h("div", { class: "sb-team away" }, away.name));
+      tint(h("div", { class: "sb-team away" }, away.name), teamColor(away.id, "#f0b35a")));
 
     this.stage.append(this.arena.canvas, h("div", { class: "cm" }, this.cmTag, this.cmText));
     this.cmTag.textContent = "MATCH CENTRE";
     this.cmText.textContent = `${home.name} v ${away.name}`;
 
-    const mine = this.perspective === 0 ? home : away;
-    const theirs = this.perspective === 0 ? away : home;
-    const pressure = h("div", { class: "pressure", title: "How far up the pitch your team has the ball. Full bar = camped on their line." },
-      h("span", { class: "pl" }, `${mine.short} PRESSURE`),
-      h("div", { class: "pbar" }, this.pFill, this.pMark),
-      h("span", { class: "pr" }, theirs.short));
+    const ms = this.opts.managedSide;
+    this.pFill.style.background = teamColor(home.id);
+    const pbar = h("div", { class: "pbar" }, this.pFill, this.pMark);
+    pbar.style.background = teamColor(away.id, "#f0b35a");
+    const pressure = h("div", { class: "pressure", title: "Who has the ball further up the pitch. Each side uses its club colour. The white marker shows where play is." },
+      tint(h("span", { class: "pl" }, `${home.short}${ms === 0 ? " (YOU)" : ""}`), teamColor(home.id)),
+      pbar,
+      tint(h("span", { class: "pr" }, `${away.short}${ms === 1 ? " (YOU)" : ""}`), teamColor(away.id, "#f0b35a")));
     this.setPressure(0.5, true);
 
     const log = h("details", { class: "logwrap" }, h("summary", {}, "Full match log"), this.feed);
@@ -447,16 +454,13 @@ export class LiveMatch {
     while (this.feed.childElementCount > 300) this.feed.lastElementChild?.remove();
   }
 
-  /** Pressure bar: share of the pitch your team has advanced, smoothed so it drifts rather than jumps. */
+  /** Pressure bar: home side fills green from the left, away side amber from the right; smoothed so it drifts. */
   private setPressure(homeShare: number, snap = false) {
     const raw = Math.min(0.97, Math.max(0.03, homeShare));
-    const mine = this.perspective === 0 ? raw : 1 - raw;
-    this.pressure = snap ? mine : this.pressure * 0.4 + mine * 0.6;
+    this.pressure = snap ? raw : this.pressure * 0.4 + raw * 0.6;
     const pct = `${(this.pressure * 100).toFixed(1)}%`;
     this.pFill.style.width = pct;
     this.pMark.style.left = pct;
-    this.pFill.classList.toggle("hot", this.pressure > 0.6);
-    this.pFill.classList.toggle("cold", this.pressure < 0.35);
   }
 
   /** Refresh energy bars without disturbing a focused control. */
