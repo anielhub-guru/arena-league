@@ -23,6 +23,8 @@ export const TEAM_DEFS: TeamDef[] = [
   { id: "hig", name: "Ibadan Vanguard", short: "IBA", strength: 61, style: "defensive", color: "#e58fb4" },
 ];
 
+const PROSPECT_CENTRE = 63;
+
 /** Club colour by team id (falls back to the old home/away colours). */
 export const teamColor = (id: string, fallback = "#8fe3a6") => TEAM_DEFS.find((d) => d.id === id)?.color ?? fallback;
 
@@ -43,6 +45,20 @@ const ROLE_BIAS: Record<Role, Partial<Record<Attr, number>>> = {
 
 const clampRating = (v: number) => Math.max(30, Math.min(95, Math.round(v)));
 
+function buildPlayer(rng: Rng, id: string, name: string, role: Role, age: number, base: number): Player {
+  const p: Player = { id, name, role, age, power: 0, pace: 0, handling: 0, tackling: 0, kicking: 0, stamina: 0 };
+  for (const a of ATTRS) p[a] = clampRating(base + (ROLE_BIAS[role][a] ?? 0) + rng.int(-8, 8));
+  return p;
+}
+
+/** Potential for a player who already exists: young players have headroom, veterans have none. */
+export function initialPotential(p: Player, rng: Rng): number {
+  return clampRating(overall(p) + Math.max(0, Math.round((27 - p.age) * 1.6)) + rng.int(0, 4));
+}
+
+/** 1 to 5 stars for a potential (or scouted potential) value. */
+export const potentialStars = (v: number) => Math.max(1, Math.min(5, Math.round((v - 48) / 7)));
+
 /**
  * Clubs (names, styles, strength tiers) are fixed. Players are generated from the seed, so every
  * new game has different squads. The men's and women's leagues share the clubs but not the players.
@@ -58,28 +74,64 @@ export function generateTeams(seed: number, gender: Gender = "men"): Team[] {
         name = `${rng.pick(firstNames)} ${rng.pick(LAST)}`;
       } while (used.has(name));
       used.add(name);
-      const p: Player = { id: `${def.id}-${i + 1}`, name, role, age: rng.int(20, 34), power: 0, pace: 0, handling: 0, tackling: 0, kicking: 0, stamina: 0 };
-      const base = def.strength - (i >= 5 ? 5 : 0);
-      for (const a of ATTRS) p[a] = clampRating(base + (ROLE_BIAS[role][a] ?? 0) + rng.int(-8, 8));
+      const p = buildPlayer(rng, `${def.id}-${i + 1}`, name, role, rng.int(20, 34), def.strength - (i >= 5 ? 5 : 0));
+      p.potential = initialPotential(p, new Rng(hashSeed(seed, p.id, "pot")));
       return p;
     });
     return { id: def.id, gender, name: def.name, short: def.short, style: def.style, players, lineup: players.slice(0, 5).map((p) => p.id) };
   });
 }
 
-/** Offseason: young players grow, veterans fade. */
-export function evolvePlayers(teams: Team[], seed: number): void {
+/** Chance a player retires at the end of the season in which they reach this age. */
+export const retireChance = (age: number) => (age <= 30 ? 0 : age === 31 ? 0.1 : age === 32 ? 0.25 : age === 33 ? 0.45 : age === 34 ? 0.7 : 1);
+
+/**
+ * Offseason: everyone ages. Youngsters grow toward their potential, veterans fade and lose potential.
+ * Returns the players who retire, by club id. They are not removed here.
+ */
+export function evolvePlayers(teams: Team[], seed: number): Map<string, Player[]> {
+  const retired = new Map<string, Player[]>();
   for (const t of teams) {
     const rng = new Rng(hashSeed(seed, t.id, "evolve"));
     for (const p of t.players) {
       p.age++;
-      const drift = p.age <= 24 ? 2 : p.age >= 31 ? -2 : 0;
-      for (const a of ATTRS) {
-        const bonus = a === "pace" && p.age >= 30 ? -1 : 0;
-        p[a] = clampRating(p[a] + drift + bonus + rng.int(-3, 3));
+      p.potential ??= initialPotential(p, rng);
+      if (p.age <= 27) {
+        const gap = p.potential - overall(p);
+        const gain = gap > 0 ? Math.max(0, Math.min(6, Math.round(gap / (p.age <= 22 ? 2.2 : 3.5) + rng.int(-1, 1)))) : 0;
+        for (const a of ATTRS) p[a] = clampRating(p[a] + gain + rng.int(-1, 1));
+      } else if (p.age >= 31) {
+        p.potential = Math.max(30, p.potential - 2);
+        for (const a of ATTRS) p[a] = clampRating(p[a] - 2 + (a === "pace" ? -1 : 0) + rng.int(-2, 2));
+      } else {
+        for (const a of ATTRS) p[a] = clampRating(p[a] + rng.int(-1, 1));
       }
+      if (rng.chance(retireChance(p.age))) retired.set(t.id, [...(retired.get(t.id) ?? []), p]);
     }
   }
+  return retired;
+}
+
+/** Young prospects for a vacancy. Their true potential is hidden behind a noisy `scouted` value. */
+export function makeProspects(team: Team, slotKey: string, role: Role, seed: number, count = 3): Player[] {
+  const def = TEAM_DEFS.find((d) => d.id === team.id);
+  const strength = def?.strength ?? 62;
+  const firstNames = team.gender === "women" ? FIRST_WOMEN : FIRST_MEN;
+  const taken = new Set(team.players.map((p) => p.name));
+  return Array.from({ length: count }, (_, k) => {
+    const rng = new Rng(hashSeed(seed, team.id, "prospect", slotKey, k));
+    let name: string;
+    do {
+      name = `${rng.pick(firstNames)} ${rng.pick(LAST)}`;
+    } while (taken.has(name));
+    taken.add(name);
+    // Club tiers matter less for new talent than for the founding squads, so dynasties rise and fall.
+    const potential = clampRating(PROSPECT_CENTRE + (strength - PROSPECT_CENTRE) * 0.4 + rng.int(-6, 10));
+    const p = buildPlayer(rng, `${team.id}-p${slotKey}-${k + 1}`, name, role, rng.int(17, 19), potential - rng.int(14, 20));
+    p.potential = potential;
+    p.scouted = clampRating(potential + rng.int(-6, 6));
+    return p;
+  });
 }
 
 export function overall(p: Player): number {

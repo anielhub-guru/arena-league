@@ -17,6 +17,12 @@ export interface Player {
   stamina: number;
   /** Matches still to miss after a red card (0 or missing = available). */
   ban?: number;
+  /** Ceiling for overall rating. Growth and training stop here. Missing on very old saves until migrated. */
+  potential?: number;
+  /** Noisy scouting estimate of potential, set on prospects so the true value stays hidden until signed. */
+  scouted?: number;
+  /** Retires when the offseason decision is confirmed. */
+  retiring?: boolean;
 }
 
 export type TacticId = "balanced" | "attacking" | "defensive" | "territory";

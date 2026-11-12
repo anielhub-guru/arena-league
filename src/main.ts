@@ -15,9 +15,11 @@ import {
   teamById,
   type SeasonState,
   type TrainingFocus,
+  autoPicks,
+  signProspects,
 } from "./league/season";
 import { computeStandings, teamForm } from "./league/standings";
-import { TEAM_DEFS, generateTeams, overall, teamRating } from "./league/teams";
+import { TEAM_DEFS, generateTeams, overall, potentialStars, teamRating } from "./league/teams";
 import * as store from "./storage";
 import { LiveMatch } from "./viewer/live";
 import { buildRules } from "./viewer/rules";
@@ -99,7 +101,7 @@ const startNew = (teamId: string) =>
 /** Quick sim: play the whole matchday without watching. */
 const quickSim = () => {
   const s = state;
-  if (!s || isSeasonOver(s)) return;
+  if (!s || isSeasonOver(s) || s.intake) return;
   return guarded(async () => {
     const r = playMatchday(s);
     await persist(r.state, r.logs);
@@ -118,7 +120,7 @@ const nextSeason = () => {
 /** Watch your match live (paused at kick-off so you can still adjust). */
 function watchMatch() {
   const s = state;
-  if (!s || isSeasonOver(s)) return;
+  if (!s || isSeasonOver(s) || s.intake) return;
   const f = managedFixture(s);
   if (!f) return;
   const sim = buildSim(s, f, true);
@@ -220,7 +222,8 @@ function formChips(s: SeasonState, id: string): HTMLElement {
 
 function playerTable(team: Team, opts: { selectable?: boolean } = {}): HTMLElement {
   const t = h("table", { class: "squad" });
-  t.append(h("thead", {}, h("tr", {}, h("th", {}, "Slot"), h("th", { class: "club" }, "Player"), h("th", { title: "The position this player is best at" }, "Natural role"), h("th", {}, "Age"), ...ATTRS.map((a) => h("th", { title: ATTR_INFO[a][1] }, ATTR_INFO[a][0])), h("th", { title: "Average of the six ratings" }, "Overall"))));
+  const showPot = team.id === state?.managedId;
+  t.append(h("thead", {}, h("tr", {}, h("th", {}, "Slot"), h("th", { class: "club" }, "Player"), h("th", { title: "The position this player is best at" }, "Natural role"), h("th", {}, "Age"), ...(showPot ? [h("th", { title: "Potential: how good this player can become, 1 to 5 stars. Growth and training stop at this ceiling, and it falls with age." }, "Pot")] : []), ...ATTRS.map((a) => h("th", { title: ATTR_INFO[a][1] }, ATTR_INFO[a][0])), h("th", { title: "Average of the six ratings" }, "Overall"))));
   const body = h("tbody");
   const rows: [string, Player][] = [
     ...team.lineup.map((id, i) => [ROLES[i], team.players.find((p) => p.id === id)!] as [string, Player]),
@@ -231,9 +234,10 @@ function playerTable(team: Team, opts: { selectable?: boolean } = {}): HTMLEleme
     const shown = oop ? slotPlayer(p, slot as Player["role"]) : p;
     const tr = h("tr", { class: `${slot === "Bench" ? "bench" : "starter"} ${selectedPlayer === p.id ? "sel" : ""}` },
       h("td", { class: "slot" }, slot),
-      h("td", { class: "club" }, p.name, oop ? h("span", { class: "oop", title: "Out of position: -5 to every attribute" }, " ⚠ -5") : null, isSuspended(p) ? h("span", { class: "card-chip r", title: "Sent off in the last match: misses the next one" }, "SUSPENDED") : null),
+      h("td", { class: "club" }, p.name, oop ? h("span", { class: "oop", title: "Out of position: -5 to every attribute" }, " ⚠ -5") : null, isSuspended(p) ? h("span", { class: "card-chip r", title: "Sent off in the last match: misses the next one" }, "SUSPENDED") : null, p.retiring ? h("span", { class: "card-chip r", title: "Retires when you confirm your offseason signings" }, "RETIRING") : null),
       h("td", {}, p.role),
       h("td", {}, String(p.age)),
+      ...(showPot ? [h("td", { class: "stars", title: `Potential ${p.potential ?? "?"}` }, p.potential ? stars(p.potential) : "")] : []),
       ...ATTRS.map((a) => h("td", { class: shown[a] < p[a] ? "dn" : "" }, String(shown[a]))),
       h("td", { class: "pts" }, String(overall(shown))));
     if (opts.selectable) {
@@ -316,6 +320,55 @@ function card(title: string, ...kids: (Node | string)[]): HTMLElement {
   return h("section", { class: "card" }, h("h2", {}, title), ...kids);
 }
 
+const stars = (v: number) => "★".repeat(potentialStars(v)) + "☆".repeat(5 - potentialStars(v));
+
+/** Offseason decisions: a prospect for each retirement, and an optional succession signing. */
+let intakePicks: Record<number, string | null> = {};
+
+function intakeCard(s: SeasonState): HTMLElement {
+  const team = teamById(s, s.managedId);
+  const slots = s.intake!.slots;
+  const blocks = slots.map((slot, i) => {
+    const out = team.players.find((p) => p.id === slot.outId)!;
+    const title = slot.optional
+      ? `Optional: bring in a successor for ${out.name} (${out.role}, ${out.age}, overall ${overall(out)}, ${stars(out.potential ?? 0)})`
+      : `${out.name} (${out.role}, ${out.age}) is retiring. Choose a replacement.`;
+    const t = h("table", { class: "squad" });
+    t.append(h("thead", {}, h("tr", {}, h("th", {}, ""), h("th", { class: "club" }, "Prospect"), h("th", {}, "Age"), h("th", { title: "Scouting estimate of how good they can become. Reports can be off by about a star." }, "Potential"), ...ATTRS.map((a) => h("th", { title: ATTR_INFO[a][1] }, ATTR_INFO[a][0])), h("th", {}, "Overall"))));
+    const body = h("tbody");
+    const choose = (id: string | null) => {
+      intakePicks[i] = id;
+      render();
+    };
+    if (slot.optional) {
+      const keep = h("tr", { class: `click ${(intakePicks[i] ?? null) === null ? "sel" : ""}` }, h("td", {}, (intakePicks[i] ?? null) === null ? "●" : "○"), h("td", { class: "club", colSpan: 10 }, `Keep ${out.name}`));
+      keep.onclick = () => choose(null);
+      body.append(keep);
+    }
+    for (const o of slot.options) {
+      const on = intakePicks[i] === o.id;
+      const tr = h("tr", { class: `click ${on ? "sel" : ""}` }, h("td", {}, on ? "●" : "○"), h("td", { class: "club" }, o.name), h("td", {}, String(o.age)), h("td", { class: "stars" }, stars(o.scouted ?? 0)), ...ATTRS.map((a) => h("td", {}, String(o[a]))), h("td", { class: "pts" }, String(overall(o))));
+      tr.onclick = () => choose(o.id);
+      body.append(tr);
+    }
+    t.append(body);
+    return h("div", {}, h("p", {}, h("b", {}, title)), t);
+  });
+  const ready = slots.every((slot, i) => slot.optional || !!intakePicks[i]);
+  const confirm = h("button", { class: "primary", disabled: busy || !ready }, "Confirm signings and start the season");
+  confirm.onclick = () =>
+    void guarded(async () => {
+      await persist(signProspects(s, intakePicks));
+      intakePicks = {};
+    });
+  const auto = h("button", {}, "Auto-pick");
+  auto.onclick = () => {
+    intakePicks = autoPicks(s);
+    render();
+  };
+  return card(`Season ${s.season}: offseason decisions`, h("p", { class: "dim" }, "Veterans retire and young prospects arrive. Prospects start weaker than the players they replace but grow toward their potential. Pick carefully: potential is only a scouting estimate."), ...blocks, h("div", { class: "toolbar" }, confirm, auto));
+}
+
 function overviewView(s: SeasonState): HTMLElement {
   const me = teamById(s, s.managedId);
   const ids = s.teams.map((t) => t.id);
@@ -323,7 +376,9 @@ function overviewView(s: SeasonState): HTMLElement {
   const pos = table.findIndex((r) => r.teamId === s.managedId) + 1;
   const left = h("div", { class: "col" });
 
-  if (isSeasonOver(s)) {
+  if (s.intake) {
+    left.append(intakeCard(s));
+  } else if (isSeasonOver(s)) {
     const champ = teamById(s, table[0].teamId);
     const next = h("button", { class: "primary" }, "Start next season");
     next.onclick = () => void nextSeason();
@@ -499,7 +554,7 @@ function render() {
     };
     nav.append(b);
   }
-  const over = isSeasonOver(s);
+  const over = isSeasonOver(s) || !!s.intake;
   const quick = h("button", { disabled: busy || over }, "Quick sim");
   quick.onclick = () => void quickSim();
   const watch = h("button", { class: "primary", disabled: busy || over }, "▶ Watch match");
@@ -557,7 +612,7 @@ async function boot() {
       state = upgraded;
     }
   } catch (e) {
-    error = `Could not read saved season (${e instanceof Error ? e.message : String(e)}). Picking a club will start a new game and overwrite it.`;
+    error = `Could not read saved season (${e instanceof Error ? e.message : String(e)}). Picking a club will start a new game and overwrite it. The previous save, if any, is kept as season.bak.json in the data folder.`;
   }
   render();
   // First launch: show the guide once so a new player can learn the sport before picking a club.

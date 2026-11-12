@@ -1,14 +1,14 @@
 import { hashSeed, Rng } from "../engine/rng";
 import { MatchSim, RED_BAN, SHAPE_BY_STYLE } from "../engine/match";
-import { STAT_KEYS, emptyTotals, ROLES, type Attr, type Gender, type MatchLog, type PlayerTotals, type Role, type ShapeId, type TacticId, type Team } from "../engine/types";
+import { STAT_KEYS, emptyTotals, ROLES, type Attr, type Gender, type MatchLog, type Player, type PlayerTotals, type Role, type ShapeId, type TacticId, type Team } from "../engine/types";
 import { describeLine, impact, playerOfTheMatch } from "./awards";
 import { buildSchedule, type Fixture } from "./schedule";
 import { computeStandings, standingsAt } from "./standings";
-import { evolvePlayers, generateTeams, overall } from "./teams";
+import { evolvePlayers, generateTeams, initialPotential, makeProspects, overall } from "./teams";
 
 export { describeLine, impact };
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 export type TrainingFocus = "attack" | "defence" | "kicking" | "fitness";
 export const TRAINING: Record<TrainingFocus, { label: string; description: string; attrs: Attr[] }> = {
@@ -17,6 +17,20 @@ export const TRAINING: Record<TrainingFocus, { label: string; description: strin
   kicking: { label: "Kicking", description: "Goal-kicking and territory kicks.", attrs: ["kicking"] },
   fitness: { label: "Fitness", description: "Stamina, so players stay fresh late on.", attrs: ["stamina"] },
 };
+
+/** One offseason decision: pick a prospect for a vacancy. */
+export interface IntakeSlot {
+  role: Role;
+  /** The squad member who retires (mandatory slot) or who you may replace (optional slot). */
+  outId: string;
+  optional: boolean;
+  /** Prospects to choose from, with true potential hidden behind `scouted`. */
+  options: Player[];
+}
+
+export interface Intake {
+  slots: IntakeSlot[];
+}
 
 export interface SeasonRecord {
   season: number;
@@ -57,13 +71,21 @@ export interface SeasonState {
   seasonStats: Record<string, PlayerTotals>;
   /** Completed seasons, by player id. Add the current season for a full career line. */
   careerStats: Record<string, CareerTotals>;
+  /** Offseason decisions waiting on the manager. The new season cannot be played until resolved. */
+  intake?: Intake;
 }
 
 /** Upgrades a saved season from an older version, or returns null if it cannot be upgraded. */
 export function migrateSave(raw: SeasonState): SeasonState | null {
-  if (raw.version === SAVE_VERSION) return { ...raw, shape: raw.shape ?? "sweeper" };
-  if (raw.version === 3) return { ...raw, version: SAVE_VERSION, seasonStats: {}, careerStats: {}, shape: raw.shape ?? "sweeper" };
-  return null;
+  let s = raw;
+  if (s.version === 3) s = { ...s, version: 4, seasonStats: {}, careerStats: {} };
+  if (s.version === 4) {
+    s = structuredClone(s);
+    for (const t of s.teams) for (const p of t.players) p.potential ??= initialPotential(p, new Rng(hashSeed(s.seed, p.id, "pot")));
+    s.version = 5;
+  }
+  if (s.version !== SAVE_VERSION) return null;
+  return { ...s, shape: s.shape ?? "sweeper" };
 }
 
 export function newGame(seed: number, managedId: string, gender: Gender = "men"): SeasonState {
@@ -131,6 +153,7 @@ export function buildSim(s: SeasonState, f: Fixture, live = false): MatchSim {
  */
 export function playMatchday(prev: SeasonState, managedLog?: MatchLog): { state: SeasonState; logs: MatchLog[] } {
   if (isSeasonOver(prev)) throw new Error("Season is over");
+  if (prev.intake) throw new Error("Choose your new signings before playing");
   const state = structuredClone(prev);
   const ids = state.teams.map((t) => t.id);
   const before = computeStandings(ids, state.fixtures);
@@ -249,7 +272,7 @@ function train(state: SeasonState, md: number): string[] {
   for (const p of [...team.players].sort(() => rng.next() - 0.5).slice(0, 3)) {
     if (!rng.chance(0.8)) continue;
     const attr = rng.pick(focus.attrs);
-    if (p[attr] >= 95) continue;
+    if (p[attr] >= 95 || overall(p) >= (p.potential ?? 99)) continue;
     p[attr]++;
     out.push(`Training: ${p.name} improved ${attr} to ${p[attr]}.`);
   }
@@ -270,11 +293,75 @@ export function startNextSeason(prev: SeasonState): SeasonState {
   }
   state.seasonStats = {};
   state.season++;
-  evolvePlayers(state.teams, hashSeed(state.seed, state.season));
+  const retirees = evolvePlayers(state.teams, hashSeed(state.seed, state.season));
+  const news: string[] = [`Season ${state.season} begins. Squads have aged and ratings have shifted.`];
+  let n = 0;
+  for (const team of state.teams) {
+    const out = retirees.get(team.id) ?? [];
+    if (team.id === state.managedId) {
+      const slots: IntakeSlot[] = out.map((r) => ({ role: r.role, outId: r.id, optional: false, options: makeProspects(team, `${state.season}.${n++}`, r.role, state.seed) }));
+      for (const r of out) {
+        r.retiring = true;
+        news.push(`${r.name} (${r.age}) retires. Choose a replacement.`);
+      }
+      const oldest = team.players.filter((p) => !p.retiring).sort((a, b) => b.age - a.age || a.id.localeCompare(b.id))[0];
+      if (oldest && oldest.age >= 28) slots.push({ role: oldest.role, outId: oldest.id, optional: true, options: makeProspects(team, `${state.season}.${n++}`, oldest.role, state.seed) });
+      if (slots.length) state.intake = { slots };
+    } else {
+      // AI clubs know their prospects' true potential and take the best one.
+      for (const r of out) {
+        const best = makeProspects(team, `${state.season}.${n++}`, r.role, state.seed).sort((a, b) => (b.potential ?? 0) - (a.potential ?? 0))[0];
+        replacePlayer(team, r.id, best);
+        delete state.careerStats[r.id];
+      }
+    }
+  }
   state.fixtures = buildSchedule(ids, state.season);
   state.matchday = 1;
-  state.news = [{ season: state.season, matchday: 0, text: `Season ${state.season} begins. Squads have aged and ratings have shifted.` }, ...state.news].slice(0, 14);
+  if (state.intake) news.push("Your offseason decisions are on the Overview tab. The season starts once you confirm them.");
+  state.news = [...news.map((text) => ({ season: state.season, matchday: 0, text })), ...state.news].slice(0, 14);
   return state;
 }
 
+/** Put a new player in an old one's squad place and starting slot. */
+function replacePlayer(team: Team, oldId: string, next: Player) {
+  const i = team.players.findIndex((p) => p.id === oldId);
+  if (i < 0) throw new Error(`Unknown player ${oldId}`);
+  team.players[i] = next;
+  team.lineup = team.lineup.map((id) => (id === oldId ? next.id : id));
+}
 
+/** Sensible default picks: the best scouted prospect per slot, and only swap an optional slot if it is an upgrade. */
+export function autoPicks(s: SeasonState): Record<number, string | null> {
+  const picks: Record<number, string | null> = {};
+  const team = teamById(s, s.managedId);
+  (s.intake?.slots ?? []).forEach((slot, i) => {
+    const best = [...slot.options].sort((a, b) => (b.scouted ?? 0) - (a.scouted ?? 0))[0];
+    const out = team.players.find((p) => p.id === slot.outId);
+    picks[i] = slot.optional && (!out || (best.scouted ?? 0) <= (out.potential ?? 0) + 2) ? null : best.id;
+  });
+  return picks;
+}
+
+/** Applies the manager's offseason choices. `picks[i]` is the chosen prospect id for slot i; optional slots may be null. */
+export function signProspects(prev: SeasonState, picks: Record<number, string | null>): SeasonState {
+  if (!prev.intake) throw new Error("Nothing to decide");
+  const state = structuredClone(prev);
+  const team = teamById(state, state.managedId);
+  const news: string[] = [];
+  state.intake!.slots.forEach((slot, i) => {
+    const id = picks[i] ?? null;
+    if (!id) {
+      if (!slot.optional) throw new Error("Choose a replacement for every retiring player");
+      return;
+    }
+    const prospect = slot.options.find((o) => o.id === id);
+    if (!prospect) throw new Error("That prospect is not on the shortlist");
+    const out = team.players.find((p) => p.id === slot.outId);
+    replacePlayer(team, slot.outId, prospect);
+    news.push(slot.optional ? `Signed ${prospect.name} (${prospect.role}, ${prospect.age}) to succeed ${out?.name ?? "a veteran"}.` : `Signed ${prospect.name} (${prospect.role}, ${prospect.age}) to replace ${out?.name ?? "a retiree"}.`);
+  });
+  delete state.intake;
+  state.news = [...news.map((text) => ({ season: state.season, matchday: 0, text })), ...state.news].slice(0, 14);
+  return state;
+}

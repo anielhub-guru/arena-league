@@ -24,6 +24,14 @@ fn atomic_write(path: &Path, data: &str) -> Result<(), String> {
     fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
+/// Keep the previous save as season.bak.json so one bad write or bug never costs a whole career.
+/// Best effort: a failed backup must not block saving.
+fn backup_previous(path: &Path) {
+    if path.exists() {
+        let _ = fs::copy(path, path.with_extension("bak.json"));
+    }
+}
+
 fn read_optional(path: &Path) -> Result<Option<String>, String> {
     match fs::read_to_string(path) {
         Ok(s) => Ok(Some(s)),
@@ -39,7 +47,9 @@ fn load_save(app: AppHandle) -> Result<Option<String>, String> {
 
 #[tauri::command]
 fn write_save(app: AppHandle, json: String) -> Result<(), String> {
-    atomic_write(&root(&app)?.join(SAVE_FILE), &json)
+    let path = root(&app)?.join(SAVE_FILE);
+    backup_previous(&path);
+    atomic_write(&path, &json)
 }
 
 #[tauri::command]
@@ -96,6 +106,19 @@ mod tests {
         assert!(!valid_id("../evil"));
         assert!(!valid_id("a/b"));
         assert!(!valid_id(""));
+    }
+
+    #[test]
+    fn previous_save_is_kept_as_backup() {
+        let dir = std::env::temp_dir().join(format!("arena-bak-{}", std::process::id()));
+        let path = dir.join(SAVE_FILE);
+        backup_previous(&path); // nothing to back up yet: no panic
+        atomic_write(&path, "{\"v\":1}").unwrap();
+        backup_previous(&path);
+        atomic_write(&path, "{\"v\":2}").unwrap();
+        assert_eq!(read_optional(&path).unwrap().as_deref(), Some("{\"v\":2}"));
+        assert_eq!(read_optional(&dir.join("season.bak.json")).unwrap().as_deref(), Some("{\"v\":1}"));
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

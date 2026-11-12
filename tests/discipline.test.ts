@@ -4,7 +4,7 @@ import { BIN_PHASES, MatchSim, simulateMatch } from "../src/engine/match";
 import { Rng, hashSeed } from "../src/engine/rng";
 import type { MatchLog, Team } from "../src/engine/types";
 import { STAT_KEYS } from "../src/engine/types";
-import { SAVE_VERSION, careerLine, isSeasonOver, migrateSave, newGame, playMatchday, startNextSeason } from "../src/league/season";
+import { SAVE_VERSION, autoPicks, signProspects, careerLine, isSeasonOver, migrateSave, newGame, playMatchday, startNextSeason } from "../src/league/season";
 import { generateTeams } from "../src/league/teams";
 import { buildScene } from "../src/viewer/scenes";
 
@@ -252,7 +252,7 @@ describe("player stats", () => {
     expect(s2.careerStats[id].apps).toBe(seasonOne.apps);
     expect(s2.careerStats[id].seasons).toBe(1);
     for (const k of STAT_KEYS) expect(careerLine(s2, id)[k]).toBe(seasonOne[k]);
-    const s3 = playMatchday(s2).state;
+    const s3 = playMatchday(s2.intake ? signProspects(s2, autoPicks(s2)) : s2).state;
     expect(careerLine(s3, id).apps).toBeGreaterThanOrEqual(seasonOne.apps);
   });
 

@@ -298,3 +298,5 @@ h3.sub { color: var(--acc); font-size: 12px; text-transform: uppercase; letter-s
 .potm-name { color: var(--acc); font-size: 15px; font-weight: bold; }
 .mvp { padding: 2px 0; font-size: 12px; }
 .potm-line { color: var(--acc); margin-top: 6px; font-size: 12px; }
+
+td.stars { color: #e3cf7a; letter-spacing: 1px; white-space: nowrap; }
