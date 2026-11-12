@@ -1,6 +1,6 @@
 [package]
 name = "arena-league-manager"
-version = "0.2.0"
+version = "0.3.0"
 description = "Offline text-only 5v5 arena league management game"
 edition = "2021"
 
