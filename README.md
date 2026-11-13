@@ -1,4 +1,4 @@
-<h1 align="center">Arena League Manager</h1>
+<h1 align="center">Dominion League Manager</h1>
 
 <p align="center"><b>Coach a Nigerian club through a full season of Dominion, a brand-new five-a-side rugby sport.<br>Pick the five. Set the tactic. Then watch every try, tackle and missed kick unfold.</b></p>
 
@@ -76,11 +76,11 @@ Win 4, draw 2, plus a bonus point for three or more tries and one for a close lo
 
 ## Play it
 
-Arena League Manager is early software and there are no packaged releases yet, so you run it from source (about two minutes with Node and Rust installed). See [Installation & development](#installation--development) for the full steps.
+Dominion League Manager is early software and there are no packaged releases yet, so you run it from source (about two minutes with Node and Rust installed). See [Installation & development](#installation--development) for the full steps.
 
 ```sh
-git clone https://github.com/anielhub-guru/arena-league.git
-cd arena-league
+git clone https://github.com/anielhub-guru/dominion-rugby-manager.git
+cd dominion-rugby-manager
 npm install
 npm run tauri dev
 ```
@@ -120,9 +120,9 @@ The current version is in `package.json` (also shown in the app footer). To rele
 
 After each matchday the app writes full match logs first, then the season, to the app local data directory (written atomically via temp file and rename):
 
-- macOS: `~/Library/Application Support/com.arenaleague.manager/`
-- Windows: `%LOCALAPPDATA%\com.arenaleague.manager\`
-- Linux: `~/.local/share/com.arenaleague.manager/`
+- macOS: `~/Library/Application Support/com.dominionleague.manager/`
+- Windows: `%LOCALAPPDATA%\com.dominionleague.manager\`
+- Linux: `~/.local/share/com.dominionleague.manager/`
 
 Contents: `season.json` and `matches/<fixtureId>.json`. Each write keeps the previous save as `season.bak.json`. Saves from versions 3 to 5 are upgraded on load; older ones are not compatible. The path is shown in the footer. In a plain browser (`npm run dev` without Tauri) it falls back to localStorage.
 
@@ -131,8 +131,8 @@ Contents: `season.json` and `matches/<fixtureId>.json`. Each write keeps the pre
 Quick start (needs Node 20+ and Rust, see below):
 
 ```sh
-git clone https://github.com/anielhub-guru/arena-league.git
-cd arena-league
+git clone https://github.com/anielhub-guru/dominion-rugby-manager.git
+cd dominion-rugby-manager
 npm install
 npm run tauri dev
 ```
@@ -200,10 +200,10 @@ Bug reports and ideas are welcome. Contributions are accepted under the project'
 
 ## License
 
-Arena League Manager is free software under the [GNU General Public License v3.0](LICENSE).
+Dominion League Manager is free software under the [GNU General Public License v3.0](LICENSE).
 
 ```
-Arena League Manager
+Dominion League Manager
 Copyright (C) 2026 anielhub-guru
 
 This program is free software: you can redistribute it and/or modify it under the terms of the

@@ -24,7 +24,7 @@ import {
   type OffseasonPlan,
 } from "./league/season";
 import { computeStandings, teamForm } from "./league/standings";
-import { TEAM_DEFS, generateTeams, overall, potentialStars, teamRating } from "./league/teams";
+import { TEAM_DEFS, clubObjective, generateTeams, overall, potentialStars, teamRating } from "./league/teams";
 import * as store from "./storage";
 import { LiveMatch } from "./viewer/live";
 import { ATTR_NAMES, TACTIC_FOCUS, bestFive, buildRadar, playerProfile, profileOf } from "./viewer/radar";
@@ -501,6 +501,7 @@ function overviewView(s: SeasonState): HTMLElement {
           h("div", { class: "side" }, h("b", {}, home ? opp.name : me.name), h("div", { class: "dim" }, home ? `${ordinal(oppPos)}` : `${ordinal(pos)}`))),
         h("div", { class: "dim" }, `${home ? "Home" : "Away"}  |  Your tactic: ${TACTICS[s.tactic].label}  |  Shape: ${SHAPES[s.shape].label}  |  Rating ${teamRating(me)} v ${teamRating(opp)}`),
         h("div", { class: "dim" }, "Opposition form: ", formChips(s, opp.id)),
+        h("div", { class: "dim" }, `Club goal: ${clubObjective(s.managedId, s.history[s.history.length - 1]?.managedPosition)}`),
         h("div", { class: "toolbar" }, watch, sim, sc),
         h("div", { class: "hint" }, "Set your lineup, tactic and training on the Squad tab first. Watching lets you change tactics, substitute and give a half-time talk as it happens."),
       ),
@@ -642,7 +643,7 @@ function fixturesView(s: SeasonState): HTMLElement {
 
 
 function pickerView(): HTMLElement {
-  const box = h("div", { class: "picker" }, h("h1", {}, "ARENA LEAGUE MANAGER"), h("p", { class: "dim" }, `Dominion: five-a-side rugby for territory, played across Nigeria.  Version ${__APP_VERSION__}`));
+  const box = h("div", { class: "picker" }, h("h1", {}, "DOMINION LEAGUE MANAGER"), h("p", { class: "dim" }, `Dominion: five-a-side rugby for territory, played across Nigeria.  Version ${__APP_VERSION__}`));
   const help = h("button", {}, "How to play");
   help.onclick = showRules;
 
@@ -678,7 +679,7 @@ function pickerView(): HTMLElement {
   box.append(h("p", {}, pickGender === "women" ? "Women's league: choose your club" : "Men's league: choose your club"));
   for (const def of TEAM_DEFS) {
     const t = teams.find((x) => x.id === def.id)!;
-    const b = h("button", { class: "pick" }, h("b", {}, def.name), h("span", { class: "dim" }, `Style: ${TACTICS[def.style].label}   Rating ~${teamRating(t)}`));
+    const b = h("button", { class: "pick" }, h("b", {}, def.name), h("span", { class: "dim pick-info" }, `Style: ${TACTICS[def.style].label}   Rating ~${teamRating(t)}`), h("span", { class: "dim pick-goal" }, `Goal: ${clubObjective(def.id)}`));
     b.onclick = () => void startNew(def.id);
     box.append(b);
   }
@@ -725,7 +726,7 @@ function render() {
   newBtn.onclick = newGameFlow;
   const helpBtn = h("button", {}, "How to play");
   helpBtn.onclick = showRules;
-  app.append(h("header", {}, h("h1", {}, "ARENA LEAGUE"), nav, h("span", { class: "spacer" }), h("span", { class: "dim" }, `${teamById(s, s.managedId).name} | ${s.gender === "women" ? "Women's" : "Men's"} League | Season ${s.season} | ${fmtMoney(s.money)}`), watch, quick, helpBtn, newBtn));
+  app.append(h("header", {}, h("h1", {}, "DOMINION LEAGUE"), nav, h("span", { class: "spacer" }), h("span", { class: "dim" }, `${teamById(s, s.managedId).name} | ${s.gender === "women" ? "Women's" : "Men's"} League | Season ${s.season} | ${fmtMoney(s.money)}`), watch, quick, helpBtn, newBtn));
 
   const body = h("main");
   if (tab === "overview") body.append(overviewView(s));
@@ -734,7 +735,7 @@ function render() {
   else body.append(fixturesView(s));
   app.append(body);
   if (error) app.append(h("div", { class: "err" }, error));
-  app.append(h("footer", {}, `Arena League Manager v${__APP_VERSION__}  |  Saved automatically  |  Data: ${dir}`));
+  app.append(h("footer", {}, `Dominion League Manager v${__APP_VERSION__}  |  Saved automatically  |  Data: ${dir}`));
   // Restore scroll after layout; a tab switch (different tab than last render) starts at the top.
   const sameView = lastScrollTab === tab;
   lastScrollTab = tab;
@@ -786,8 +787,8 @@ async function boot() {
   render();
   // First launch: show the guide once so a new player can learn the sport before picking a club.
   try {
-    if (!state && !localStorage.getItem("arena:help-seen")) {
-      localStorage.setItem("arena:help-seen", "1");
+    if (!state && !localStorage.getItem("dominion:help-seen")) {
+      localStorage.setItem("dominion:help-seen", "1");
       showRules();
     }
   } catch {

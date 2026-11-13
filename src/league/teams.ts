@@ -138,6 +138,25 @@ export function overall(p: Player): number {
   return Math.round((p.power + p.pace + p.handling + p.tackling + p.kicking + p.stamina) / 6);
 }
 
+/** The club's internal goal, flavour only: first season: its strength rank among the league's clubs; later seasons: your last finish. */
+export function clubObjective(clubId: string, lastFinish?: number): string {
+  if (lastFinish) {
+    // After the first season the goal follows your last finish: hold the title, chase the one above, or climb.
+    if (lastFinish <= 1) return "Defend the title";
+    if (lastFinish === 2) return "Win the league";
+    if (lastFinish >= TEAM_DEFS.length) return "Climb off the bottom";
+    return `Finish in the top ${lastFinish - 1}`;
+  }
+  const order = TEAM_DEFS.map((d, i) => ({ id: d.id, strength: d.strength, i })).sort((a, b) => b.strength - a.strength || a.i - b.i);
+  const rank = order.findIndex((d) => d.id === clubId);
+  if (rank < 0) return "";
+  const n = order.length;
+  if (rank < n / 4) return "Win the league";
+  if (rank < n / 2) return "Finish in the top half";
+  if (rank < (n * 3) / 4) return "Finish in the top six";
+  return "Avoid finishing bottom";
+}
+
 export function teamRating(t: Team): number {
   const starters = t.lineup.map((id) => t.players.find((p) => p.id === id)!);
   return Math.round(starters.reduce((s, p) => s + overall(p), 0) / starters.length);

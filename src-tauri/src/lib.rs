@@ -88,12 +88,48 @@ fn data_dir(app: AppHandle) -> Result<String, String> {
     Ok(root(&app)?.display().to_string())
 }
 
+const LEGACY_IDENTIFIER: &str = "com.arenaleague.manager";
+
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let dest = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &dest)?;
+        } else {
+            fs::copy(entry.path(), dest)?;
+        }
+    }
+    Ok(())
+}
+
+/// One-time migration from the pre-rename data folder (com.arenaleague.manager).
+/// Copies (never moves) so the old data stays as a backup. Best effort: never blocks startup.
+fn migrate_legacy_data(current: &Path) {
+    if current.join(SAVE_FILE).exists() {
+        return;
+    }
+    if let Some(parent) = current.parent() {
+        let legacy = parent.join(LEGACY_IDENTIFIER);
+        if legacy.join(SAVE_FILE).exists() {
+            let _ = copy_dir(&legacy, current);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            if let Ok(dir) = app.path().app_local_data_dir() {
+                migrate_legacy_data(&dir);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![load_save, write_save, write_match_log, read_match_log, reset_save, data_dir])
         .run(tauri::generate_context!())
-        .expect("error while running Arena League Manager");
+        .expect("error while running Dominion League Manager");
 }
 
 #[cfg(test)]
@@ -110,7 +146,7 @@ mod tests {
 
     #[test]
     fn previous_save_is_kept_as_backup() {
-        let dir = std::env::temp_dir().join(format!("arena-bak-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("dominion-bak-{}", std::process::id()));
         let path = dir.join(SAVE_FILE);
         backup_previous(&path); // nothing to back up yet: no panic
         atomic_write(&path, "{\"v\":1}").unwrap();
@@ -122,8 +158,25 @@ mod tests {
     }
 
     #[test]
+    fn legacy_data_is_migrated_once() {
+        let base = std::env::temp_dir().join(format!("dominion-mig-{}", std::process::id()));
+        let legacy = base.join(LEGACY_IDENTIFIER);
+        let current = base.join("com.dominionleague.manager");
+        atomic_write(&legacy.join(SAVE_FILE), "{\"old\":1}").unwrap();
+        atomic_write(&legacy.join(MATCH_DIR).join("m.json"), "{}").unwrap();
+        migrate_legacy_data(&current);
+        assert_eq!(read_optional(&current.join(SAVE_FILE)).unwrap().as_deref(), Some("{\"old\":1}"));
+        assert!(current.join(MATCH_DIR).join("m.json").exists());
+        assert!(legacy.join(SAVE_FILE).exists());
+        atomic_write(&current.join(SAVE_FILE), "{\"new\":1}").unwrap();
+        migrate_legacy_data(&current); // must not overwrite
+        assert_eq!(read_optional(&current.join(SAVE_FILE)).unwrap().as_deref(), Some("{\"new\":1}"));
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
     fn save_round_trip_and_overwrite() {
-        let dir = std::env::temp_dir().join(format!("arena-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("dominion-test-{}", std::process::id()));
         let path = dir.join("matches").join("x.json");
         assert_eq!(read_optional(&path).unwrap(), None);
         atomic_write(&path, "{\"a\":1}").unwrap();
