@@ -589,9 +589,9 @@ function overviewView(s: SeasonState): HTMLElement {
     if (n.kind === "finish") return h("li", { class: "news-finish" }, h("span", { class: "pos-badge" }, `${n.position}`), h("div", {}, stamp, n.text));
     return h("li", {}, stamp, n.text);
   };
-  left.append(card("Club news", h("ul", { class: "news" }, ...s.news.slice(0, 8).map(newsItem))));
-
-  const right = h("div", { class: "col" }, card("League table", buildTable(s, { compact: true, onClub: (id) => (id === s.managedId ? undefined : scout(s, id)) })));
+  const right = h("div", { class: "col" },
+    card("League table", buildTable(s, { compact: true, onClub: (id) => (id === s.managedId ? undefined : scout(s, id)) })),
+    card("Club news", h("ul", { class: "news" }, ...s.news.slice(0, 8).map(newsItem))));
   return h("div", { class: "grid" }, left, right);
 }
 
