@@ -240,7 +240,7 @@ const SECTIONS: Section[] = [
     body: () => [
       p("Every player has a hidden ", b("potential"), ": a ceiling on how good they can become. Players under 28 grow toward it, from 31 they fade (and their ceiling falls), and from 31 they can retire. Training can never lift a player past their potential."),
       h("h4", {}, "The offseason"),
-      p("After matchday 14 and before the next season you have an offseason screen. Retirees leave, and you must refill your squad to eight with at least one natural player in each of the five positions. Beyond that, everything is optional."),
+      p("After matchday 14 and before the next season you have an offseason screen. Retirees leave, and you must refill your squad to ten (five starters, three on the bench and two reserves) with at least one natural player in each of the five positions. Beyond that, everything is optional."),
       ul(
         [b("Youth shortlist."), " Teenage prospects, three for each position that lost a player and one for the others. Their rating is real but their potential is a scouting estimate (1 to 5 stars) that can be about a star out. Sign any of them, replacing anyone you choose."],
         [b("Selling."), " Sell any player who is not retiring. They go to another club and you get their sale price."],

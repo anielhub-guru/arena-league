@@ -50,8 +50,8 @@ describe("player lifecycle", () => {
       s = completeOffseason(s, autoPlan(s));
       setBestLineup(s);
       for (const t of s.teams) {
-        expect(t.players).toHaveLength(8);
-        expect(new Set(t.players.map((p) => p.id)).size).toBe(8);
+        expect(t.players).toHaveLength(10);
+        expect(new Set(t.players.map((p) => p.id)).size).toBe(10);
         expect(new Set(t.lineup).size).toBe(5);
         for (const id of t.lineup) expect(t.players.some((p) => p.id === id)).toBe(true);
       }
@@ -107,7 +107,7 @@ describe("offseason", () => {
     const empty: OffseasonPlan = { sell: [], sign: [], buy: [] };
     const c = checkPlan(s, empty);
     expect(c.ok).toBe(false);
-    expect(c.problems.join(" ")).toMatch(/squad must have 8/);
+    expect(c.problems.join(" ")).toMatch(/squad must have 10/);
     expect(() => completeOffseason(s, empty)).toThrow();
     const after = completeOffseason(s, autoPlan(s));
     expect(after.intake).toBeUndefined();
@@ -153,8 +153,8 @@ describe("offseason", () => {
     expect(t2.players.some((p) => p.id === sold.id)).toBe(false);
     expect(t2.players.some((p) => p.id === prospect!.id)).toBe(true);
     // Every club still has eight, and nobody is duplicated: the sold player went to a rival or abroad.
-    for (const t of after.teams) expect(t.players).toHaveLength(8);
-    expect(new Set(after.teams.flatMap((t) => t.players.map((p) => p.id))).size).toBe(64);
+    for (const t of after.teams) expect(t.players).toHaveLength(10);
+    expect(new Set(after.teams.flatMap((t) => t.players.map((p) => p.id))).size).toBe(80);
   });
 
   it("buying costs the asking price, takes the player from a club that replaces him, and hides true potential until signed", () => {
@@ -175,7 +175,7 @@ describe("offseason", () => {
     expect(mine.players.some((p) => p.id === listing.player.id)).toBe(true);
     expect(mine.players.find((p) => p.id === listing.player.id)!.potential).toBeDefined();
     const club = teamById(after, listing.clubId);
-    expect(club.players).toHaveLength(8);
+    expect(club.players).toHaveLength(10);
     expect(club.players.some((p) => p.id === listing.player.id)).toBe(false);
     expect(after.money).toBe(s.money + c.sellIncome + c.teenIncome - listing.price);
   });

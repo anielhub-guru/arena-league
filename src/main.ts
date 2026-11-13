@@ -19,9 +19,11 @@ import {
   type SeasonState,
   type TrainingFocus,
   autoPlan,
+  autoSelect,
   checkPlan,
   completeOffseason,
   type OffseasonPlan,
+  SQUAD_SIZE,
 } from "./league/season";
 import { computeStandings, teamForm } from "./league/standings";
 import { TEAM_DEFS, clubObjective, generateTeams, overall, potentialStars, teamRating } from "./league/teams";
@@ -137,6 +139,12 @@ function watchMatch() {
     away: teamById(s, f.awayId),
     sim,
     managedSide,
+    onBack: () => {
+      // Nothing is saved until full time, so leaving just drops the unplayed match.
+      live?.dispose();
+      live = null;
+      render();
+    },
     onExit: (log) => {
       live?.dispose();
       live = null;
@@ -204,6 +212,13 @@ function swapPlayers(a: string, b: string) {
     if (ia >= 0 && ib >= 0) [team.lineup[ia], team.lineup[ib]] = [team.lineup[ib], team.lineup[ia]];
     else if (ia >= 0) team.lineup[ia] = b;
     else if (ib >= 0) team.lineup[ib] = a;
+    // Reserves are the two spots outside the matchday eight: whoever swaps with one takes its place.
+    const res = (team.reserves ??= []);
+    const ra = res.indexOf(a);
+    const rb = res.indexOf(b);
+    if (ra >= 0 && rb >= 0) [res[ra], res[rb]] = [res[rb], res[ra]];
+    else if (ra >= 0) res[ra] = b;
+    else if (rb >= 0) res[rb] = a;
   });
 }
 
@@ -233,12 +248,13 @@ function playerTable(team: Team, opts: { selectable?: boolean } = {}): HTMLEleme
   const body = h("tbody");
   const rows: [string, Player][] = [
     ...team.lineup.map((id, i) => [ROLES[i], team.players.find((p) => p.id === id)!] as [string, Player]),
-    ...team.players.filter((p) => !team.lineup.includes(p.id)).map((p) => ["Bench", p] as [string, Player]),
+    ...team.players.filter((p) => !team.lineup.includes(p.id) && !team.reserves?.includes(p.id)).map((p) => ["Bench", p] as [string, Player]),
+    ...team.players.filter((p) => team.reserves?.includes(p.id)).map((p) => ["Reserve", p] as [string, Player]),
   ];
   for (const [slot, p] of rows) {
-    const oop = slot !== "Bench" && p.role !== slot;
+    const oop = slot !== "Bench" && slot !== "Reserve" && p.role !== slot;
     const shown = oop ? slotPlayer(p, slot as Player["role"]) : p;
-    const tr = h("tr", { class: `${slot === "Bench" ? "bench" : "starter"} ${selectedPlayer === p.id ? "sel" : ""}` },
+    const tr = h("tr", { class: `${slot === "Bench" || slot === "Reserve" ? "bench" : "starter"} ${selectedPlayer === p.id ? "sel" : ""}` },
       h("td", { class: "slot" }, slot),
       h("td", { class: "club" }, p.name, oop ? h("span", { class: "oop", title: "Out of position: -5 to every attribute" }, " ⚠ -5") : null, isSuspended(p) ? h("span", { class: "card-chip r", title: "Sent off in the last match: misses the next one" }, "SUSPENDED") : null, (p.tired ?? 0) >= 8 ? h("span", { class: "oop", title: `Tired from recent matches (${Math.round(p.tired!)}/100): starts the match slightly weaker and tires faster. High stamina recovers quicker. Rest a player to freshen them.` }, (p.tired ?? 0) >= 20 ? " ● Tired" : " ● Weary") : null, p.retiring ? h("span", { class: "card-chip r", title: "Retires when you confirm your offseason signings" }, "RETIRING") : null),
       h("td", {}, p.role),
@@ -451,10 +467,10 @@ function offseasonCard(s: SeasonState): HTMLElement {
   };
   const money = (label: string, v: number, sign = "") => h("span", { class: "dim" }, `${label} ${sign}${fmtMoney(v)}   `);
   const summary = h("div", { class: "advice" },
-    h("b", {}, `Squad ${check.size}/8   `), money("Balance now", s.money), money("Unpicked prospects sold", check.teenIncome, "+"), money("Sales", check.sellIncome, "+"), money("Purchases", check.buyCost, "-"), h("b", {}, `Balance after ${fmtMoney(check.moneyAfter)}`));
+    h("b", {}, `Squad ${check.size}/${SQUAD_SIZE}   `), money("Balance now", s.money), money("Unpicked prospects sold", check.teenIncome, "+"), money("Sales", check.sellIncome, "+"), money("Purchases", check.buyCost, "-"), h("b", {}, `Balance after ${fmtMoney(check.moneyAfter)}`));
   return card(
     `Season ${s.season}: offseason`,
-    h("p", { class: "dim" }, "Everything here is optional except refilling the squad to eight. Retirees leave, young prospects grow toward a potential you can only estimate, and prospects you do not sign are sold for income. Other clubs' players on the transfer list are priced by what they are really worth, so a good eye finds a bargain and a bad one finds a trap."),
+    h("p", { class: "dim" }, "Everything here is optional except refilling the squad to ten (five starters, three on the bench and two reserves). Retirees leave, young prospects grow toward a potential you can only estimate, and prospects you do not sign are sold for income. Other clubs' players on the transfer list are priced by what they are really worth, so a good eye finds a bargain and a bad one finds a trap."),
     summary,
     ...(check.problems.length ? [h("div", { class: "err" }, check.problems.join(" "))] : []),
     ...radarBlocks(),
@@ -516,7 +532,15 @@ function overviewView(s: SeasonState): HTMLElement {
     left.append(card(`Last result (matchday ${last.matchday})`, h("div", { class: "result" }, `${teamById(s, last.homeId).name}  ${r.homeScore} - ${r.awayScore}  ${teamById(s, last.awayId).name}`), ...(r.potm ? [h("div", { class: "potm-line" }, `★ Player of the match: ${r.potm.name} (${r.potm.club}), rating ${r.potm.rating.toFixed(1)}`)] : []), h("div", { class: "toolbar" }, btn)));
   }
 
-  left.append(card("Club news", h("ul", { class: "news" }, ...s.news.slice(0, 8).map((n) => h("li", {}, h("span", { class: "dim" }, n.matchday ? `S${n.season} MD${n.matchday}  ` : `S${n.season}  `), n.text)))));
+  const newsItem = (n: SeasonState["news"][number]) => {
+    const stamp = h("span", { class: "dim" }, n.matchday ? `S${n.season} MD${n.matchday}  ` : `S${n.season}  `);
+    if (n.kind === "title") {
+      return h("li", { class: "news-title" }, h("div", { class: "trophy" }, "🏆"), h("div", { class: "nt-body" }, h("div", { class: "nt-kicker" }, `SEASON ${n.season} · LEAGUE CHAMPIONS`), h("div", { class: "nt-text" }, n.text)));
+    }
+    if (n.kind === "finish") return h("li", { class: "news-finish" }, h("span", { class: "pos-badge" }, `${n.position}`), h("div", {}, stamp, n.text));
+    return h("li", {}, stamp, n.text);
+  };
+  left.append(card("Club news", h("ul", { class: "news" }, ...s.news.slice(0, 8).map(newsItem))));
 
   const right = h("div", { class: "col" }, card("League table", buildTable(s, { compact: true, onClub: (id) => (id === s.managedId ? undefined : scout(s, id)) })));
   return h("div", { class: "grid" }, left, right);
@@ -526,7 +550,19 @@ function squadView(s: SeasonState): HTMLElement {
   const team = teamById(s, s.managedId);
   const hint = selectedPlayer
     ? "Now click another player to swap places with them (or click the same player to cancel)."
-    : "Click a player, then click another, to swap them. Starters fill the five slots in order; bench players can replace any starter.";
+    : "Click a player, then click another, to swap them. Starters fill the five slots in order; bench players can replace any starter. The two reserves are outside the matchday eight: swap one in here between matches.";
+
+  const autoBtn = h("button", { title: "Pick the best starters, bench and reserves from current ratings, tiredness and suspensions" }, "Auto select team");
+  autoBtn.onclick = () => {
+    selectedPlayer = null;
+    error = "";
+    void update((x) => {
+      const t = teamById(x, x.managedId);
+      const pick = autoSelect(t);
+      t.lineup = pick.lineup;
+      t.reserves = pick.reserves;
+    });
+  };
 
   const starters = team.lineup.map((id, i) => slotPlayer(team.players.find((p) => p.id === id)!, ROLES[i]));
   const fit = attackFit(starters);
@@ -602,7 +638,7 @@ function squadView(s: SeasonState): HTMLElement {
     training.append(b);
   }
   return h("div", { class: "col" },
-    card(`${team.name} - starting five & bench`, h("div", { class: "hint" }, hint), playerTable(team, { selectable: true })),
+    card(`${team.name} - starting five, bench & reserves`, h("div", { class: "toolbar" }, autoBtn), h("div", { class: "hint" }, hint), playerTable(team, { selectable: true })),
     ...(profileCard ? [profileCard] : []),
     shapeCard,
     card("Player stats", h("div", { class: "hint" }, "Hover a column heading to see what it counts. Yellow card: 10 minutes in the sin bin. Red card: off for the match and a one-match ban."), statsTable(s, team, render)),
@@ -644,7 +680,7 @@ function fixturesView(s: SeasonState): HTMLElement {
 
 function pickerView(): HTMLElement {
   const box = h("div", { class: "picker" }, h("h1", {}, "DOMINION LEAGUE MANAGER"), h("p", { class: "dim" }, `Dominion: five-a-side rugby for territory, played across Nigeria.  Version ${__APP_VERSION__}`));
-  const help = h("button", {}, "How to play");
+  const help = h("button", { class: "icon", title: "How to play" }, "?");
   help.onclick = showRules;
 
   if (!pickGender) {
@@ -709,7 +745,8 @@ function render() {
   const s = state;
   const nav = h("nav");
   for (const [id, label] of TABS) {
-    const b = h("button", { class: id === tab ? "active" : "" }, label);
+    const [num, ...name] = label.split(" ");
+    const b = h("button", { class: id === tab ? "active" : "" }, name.join(" "), h("kbd", {}, num));
     b.onclick = () => {
       tab = id;
       selectedPlayer = null;
@@ -718,15 +755,23 @@ function render() {
     nav.append(b);
   }
   const over = isSeasonOver(s) || !!s.intake;
-  const quick = h("button", { disabled: busy || over }, "Quick sim");
+  const quick = h("button", { class: "ghost", disabled: busy || over, title: "Play the whole matchday without watching" }, "Quick sim");
   quick.onclick = () => void quickSim();
-  const watch = h("button", { class: "primary", disabled: busy || over }, "▶ Watch match");
+  const watch = h("button", { class: "primary cta", disabled: busy || over }, "▶ Watch match");
   watch.onclick = watchMatch;
-  const newBtn = h("button", {}, "New game");
+  const newBtn = h("button", { class: "ghost", title: "Start a new game" }, "New game");
   newBtn.onclick = newGameFlow;
-  const helpBtn = h("button", {}, "How to play");
+  const helpBtn = h("button", { class: "icon", title: "How to play" }, "?");
   helpBtn.onclick = showRules;
-  app.append(h("header", {}, h("h1", {}, "DOMINION LEAGUE"), nav, h("span", { class: "spacer" }), h("span", { class: "dim" }, `${teamById(s, s.managedId).name} | ${s.gender === "women" ? "Women's" : "Men's"} League | Season ${s.season} | ${fmtMoney(s.money)}`), watch, quick, helpBtn, newBtn));
+  const club = teamById(s, s.managedId);
+  const more = h("details", { class: "more" }, h("summary", { title: "More actions" }, "⋯"));
+  const menuQuick = h("button", { disabled: busy || over }, "Quick sim");
+  menuQuick.onclick = () => void quickSim();
+  const menuNew = h("button", {}, "New game");
+  menuNew.onclick = newGameFlow;
+  more.append(h("div", { class: "menu" }, menuQuick, menuNew));
+  const meta = h("div", { class: "hclub", title: `${club.name} · ${s.gender === "women" ? "Women's" : "Men's"} League · Season ${s.season}` }, h("span", { class: "crest" }, club.name.charAt(0)), h("div", { class: "who" }, h("b", {}, club.name), h("span", {}, `${s.gender === "women" ? "Women's" : "Men's"} League · Season ${s.season}`)));
+  app.append(h("header", {}, h("div", { class: "brand" }, h("i"), h("span", {}, "DOMINION LEAGUE")), nav, h("span", { class: "spacer" }), meta, h("span", { class: "money" }, fmtMoney(s.money)), h("div", { class: "hactions" }, quick, newBtn, more, helpBtn, watch)));
 
   const body = h("main");
   if (tab === "overview") body.append(overviewView(s));
@@ -744,6 +789,11 @@ function render() {
     window.scrollTo(0, keepWin);
   }
 }
+
+document.addEventListener("click", (e) => {
+  document.querySelectorAll<HTMLDetailsElement>("details.more[open]").forEach((d) => { if (!d.contains(e.target as Node) || (e.target as HTMLElement).closest(".menu button")) d.open = false;
+  });
+});
 
 document.addEventListener("keydown", (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -796,4 +846,40 @@ async function boot() {
   }
 }
 
+// ------------------------------------------------------------------ play-time clock
+
+/** Real time spent in the game: this session and the running total across sessions, bottom-right. */
+function startPlayClock() {
+  const KEY = "arena:play-ms";
+  let saved = 0;
+  try {
+    saved = Number(localStorage.getItem(KEY)) || 0;
+  } catch {
+    /* storage unavailable: the total restarts each session */
+  }
+  let session = 0;
+  let last = Date.now();
+  const el = h("div", { class: "playclock", title: "Real time you have spent playing" });
+  document.body.append(el);
+  const fmt = (ms: number) => {
+    const mins = Math.floor(ms / 60000);
+    return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, "0")}m`;
+  };
+  const tick = () => {
+    const now = Date.now();
+    // Only count while the window is visible; ignore huge gaps (sleep).
+    if (!document.hidden) session += Math.min(now - last, 5000);
+    last = now;
+    el.textContent = `⏱ Session ${fmt(session)}  |  Total ${fmt(saved + session)}`;
+    try {
+      localStorage.setItem(KEY, String(saved + session));
+    } catch {
+      /* ignore */
+    }
+  };
+  tick();
+  window.setInterval(tick, 5000);
+}
+
+startPlayClock();
 void boot();

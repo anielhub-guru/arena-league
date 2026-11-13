@@ -267,7 +267,7 @@ function makeSide(team: Team, tactic: TacticId, shape: ShapeId, auto: boolean, a
     if (!p) throw new Error(`Lineup slot ${slot} of ${team.name} is empty`);
     return p;
   });
-  const spare = team.players.filter((p) => !team.lineup.includes(p.id) && !isBanned(p));
+  const spare = team.players.filter((p) => !team.lineup.includes(p.id) && !team.reserves?.includes(p.id) && !isBanned(p));
   const field = ROLES.map((slot, i) => {
     let p = starters[i];
     if (isBanned(p) && spare.length) {
