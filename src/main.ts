@@ -222,8 +222,21 @@ function swapPlayers(a: string, b: string) {
   });
 }
 
+let newGameArmed = false;
 function newGameFlow() {
-  if (!window.confirm("Abandon this save and start a new game?")) return;
+  // The desktop webview blocks window.confirm, so confirm in the page: first click arms, second click proceeds.
+  if (!newGameArmed) {
+    newGameArmed = true;
+    render();
+    setTimeout(() => {
+      if (newGameArmed) {
+        newGameArmed = false;
+        render();
+      }
+    }, 5000);
+    return;
+  }
+  newGameArmed = false;
   state = null;
   pickGender = null;
   render();
@@ -715,7 +728,7 @@ function pickerView(): HTMLElement {
   box.append(h("p", {}, pickGender === "women" ? "Women's league: choose your club" : "Men's league: choose your club"));
   for (const def of TEAM_DEFS) {
     const t = teams.find((x) => x.id === def.id)!;
-    const b = h("button", { class: "pick" }, h("b", {}, def.name), h("span", { class: "dim pick-info" }, `Style: ${TACTICS[def.style].label}   Rating ~${teamRating(t)}`), h("span", { class: "dim pick-goal" }, `Goal: ${clubObjective(def.id)}`));
+    const b = h("button", { class: "pick" }, h("b", {}, def.name), h("span", { class: "dim pick-info" }, `Style: ${TACTICS[def.style].label}   Rating ~${teamRating(t)}`));
     b.onclick = () => void startNew(def.id);
     box.append(b);
   }
@@ -759,7 +772,11 @@ function render() {
   quick.onclick = () => void quickSim();
   const watch = h("button", { class: "primary cta", disabled: busy || over }, "▶ Watch match");
   watch.onclick = watchMatch;
+<<<<<<< Updated upstream
   const newBtn = h("button", { class: "ghost", title: "Start a new game" }, "New game");
+=======
+  const newBtn = h("button", { class: newGameArmed ? "primary" : "" }, newGameArmed ? "Click again to abandon this save" : "New game");
+>>>>>>> Stashed changes
   newBtn.onclick = newGameFlow;
   const helpBtn = h("button", { class: "icon", title: "How to play" }, "?");
   helpBtn.onclick = showRules;
