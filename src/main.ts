@@ -679,7 +679,7 @@ function fixturesView(s: SeasonState): HTMLElement {
 
 function pickerView(): HTMLElement {
   const box = h("div", { class: "picker" }, h("h1", {}, "ARENA LEAGUE MANAGER"), h("p", { class: "dim" }, `Dominion: five-a-side rugby for territory, played across Nigeria.  Version ${__APP_VERSION__}`));
-  const help = h("button", {}, "How to play");
+  const help = h("button", { class: "icon", title: "How to play" }, "?");
   help.onclick = showRules;
 
   if (!pickGender) {
@@ -744,7 +744,8 @@ function render() {
   const s = state;
   const nav = h("nav");
   for (const [id, label] of TABS) {
-    const b = h("button", { class: id === tab ? "active" : "" }, label);
+    const [num, ...name] = label.split(" ");
+    const b = h("button", { class: id === tab ? "active" : "" }, name.join(" "), h("kbd", {}, num));
     b.onclick = () => {
       tab = id;
       selectedPlayer = null;
@@ -753,17 +754,23 @@ function render() {
     nav.append(b);
   }
   const over = isSeasonOver(s) || !!s.intake;
-  const quick = h("button", { disabled: busy || over }, "Quick sim");
+  const quick = h("button", { class: "ghost", disabled: busy || over, title: "Play the whole matchday without watching" }, "Quick sim");
   quick.onclick = () => void quickSim();
-  const watch = h("button", { class: "primary", disabled: busy || over }, "▶ Watch match");
+  const watch = h("button", { class: "primary cta", disabled: busy || over }, "▶ Watch match");
   watch.onclick = watchMatch;
-  const newBtn = h("button", {}, "New game");
+  const newBtn = h("button", { class: "ghost", title: "Start a new game" }, "New game");
   newBtn.onclick = newGameFlow;
-  const helpBtn = h("button", {}, "How to play");
+  const helpBtn = h("button", { class: "icon", title: "How to play" }, "?");
   helpBtn.onclick = showRules;
   const club = teamById(s, s.managedId);
-  const meta = h("div", { class: "hmeta" }, h("b", {}, club.name), h("span", { class: "dim" }, `${s.gender === "women" ? "Women's" : "Men's"} League · Season ${s.season}`), h("span", { class: "money" }, fmtMoney(s.money)));
-  app.append(h("header", {}, h("h1", {}, "ARENA", h("br"), "LEAGUE"), nav, h("span", { class: "spacer" }), meta, h("div", { class: "hactions" }, watch, quick, helpBtn, newBtn)));
+  const more = h("details", { class: "more" }, h("summary", { title: "More actions" }, "⋯"));
+  const menuQuick = h("button", { disabled: busy || over }, "Quick sim");
+  menuQuick.onclick = () => void quickSim();
+  const menuNew = h("button", {}, "New game");
+  menuNew.onclick = newGameFlow;
+  more.append(h("div", { class: "menu" }, menuQuick, menuNew));
+  const meta = h("div", { class: "hclub", title: `${club.name} · ${s.gender === "women" ? "Women's" : "Men's"} League · Season ${s.season}` }, h("span", { class: "crest" }, club.name.charAt(0)), h("div", { class: "who" }, h("b", {}, club.name), h("span", {}, `${s.gender === "women" ? "Women's" : "Men's"} League · Season ${s.season}`)));
+  app.append(h("header", {}, h("div", { class: "brand" }, h("i"), h("span", {}, "ARENA LEAGUE")), nav, h("span", { class: "spacer" }), meta, h("span", { class: "money" }, fmtMoney(s.money)), h("div", { class: "hactions" }, quick, newBtn, more, helpBtn, watch)));
 
   const body = h("main");
   if (tab === "overview") body.append(overviewView(s));
@@ -781,6 +788,11 @@ function render() {
     window.scrollTo(0, keepWin);
   }
 }
+
+document.addEventListener("click", (e) => {
+  document.querySelectorAll<HTMLDetailsElement>("details.more[open]").forEach((d) => { if (!d.contains(e.target as Node) || (e.target as HTMLElement).closest(".menu button")) d.open = false;
+  });
+});
 
 document.addEventListener("keydown", (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
