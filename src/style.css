@@ -397,3 +397,15 @@ td.club.link { cursor: pointer; text-decoration: underline dotted var(--dim); te
 .saves { margin-top: 24px; }
 .save-row { display: flex; align-items: center; gap: 8px; padding: 10px 12px; margin-bottom: 8px; border: 1px solid var(--line, #2a3a33); border-radius: 6px; }
 .save-info { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+
+/* Job offers: the card's mood follows your results. */
+.offer { margin: 8px 0; padding: 12px 14px; border: 1px solid var(--line); border-left: 4px solid var(--club, var(--acc)); border-radius: 3px; background: #162a1f; }
+.offer .of-kicker { font-size: 11px; letter-spacing: 3px; font-weight: bold; color: var(--acc); }
+.offer .of-club { font-size: 22px; font-weight: bold; margin: 2px 0 4px; color: var(--club, var(--text)); }
+.offer .of-facts { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 8px 0; font-size: 13px; }
+.offer.elite { border-color: #e8c14a; background: linear-gradient(120deg, #2a2a14, #162a1f 70%); box-shadow: 0 0 18px #e8c14a33; animation: trophy-pop .8s cubic-bezier(.2,1.6,.4,1) both; }
+.offer.elite .of-kicker { color: #e8c14a; }
+.offer.lifeline { background: #141a17; border-color: #3a4a40; }
+.offer.lifeline .of-kicker { color: var(--dim); }
+.offer.lifeline .of-club { font-size: 18px; }
+@media (prefers-reduced-motion: reduce) { .offer.elite { animation: none; } }

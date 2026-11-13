@@ -656,6 +656,34 @@ function buildFullScene(ev: MatchEvent): Scene | null {
         for (let i = 0; i < 5; i++) if (A(i) !== cid) q[A(i)] = { x: Math.max(q[A(i)].x, end - 5 + i), y: q[A(i)].y };
       }, { k: "held", by: cid }, { cap: "Support arrives. Play goes on from here." });
     }
+  } else if (type === "carry") {
+    // Starts close to the line but the defence holds: no try.
+    const p = setPlay(c, x0);
+    const end = clamp(u1, p.bx + 1, 98.5);
+    burstTo(c, ai, p.bx, end, p.by, { depth: 4, tackler: did, bite: p.bite, extra: { cap: "So close to the line. The runner drives at the defence" } });
+    sb.go(750, (q) => {
+      formation(q, end, p.by, ai);
+      line(q, end, p.by, 3.5);
+      q[did] = { x: end + 0.8, y: p.by + 0.02 };
+      q[D((di + 1) % 4)] = { x: end + 1.4, y: p.by - 0.06 };
+      q[D((di + 2) % 4)] = { x: end + 1.2, y: p.by + 0.08 };
+    }, { k: "held", by: cid }, { hits: [{ kind: "tackle", runner: cid, other: did, result: "down", at: 0.3 }], banner: { text: "HELD UP!", color: AMBER, sub: surname(names.d[di]) }, cap: "Stopped short of the line. The defence holds firm" });
+    sb.go(800, () => {}, { k: "held", by: cid }, { cap: "The attack has to go again" });
+  } else if (type === "turnover" && ev.variant === "sixth") {
+    // Six tackles with no score: the attack runs out of phases and hands the ball over.
+    const p = setPlay(c, x0);
+    const end = clamp(u1, p.bx + 1, 95);
+    burstTo(c, ai, p.bx, end, p.by, { depth: 4, tackler: did, bite: p.bite, extra: { cap: "Phase after phase, and the defence will not break" } });
+    sb.go(700, (q) => {
+      formation(q, end, p.by, ai);
+      line(q, end, p.by, 3.5);
+      q[did] = { x: end + 0.8, y: p.by + 0.02 };
+      for (let i = 0; i < 4; i++) if (D(i) !== did) q[D(i)] = { x: end + 1.5 + i * 0.4, y: LANE_D[i] };
+    }, { k: "held", by: cid }, { hits: [{ kind: "tackle", runner: cid, other: did, result: "down", at: 0.3 }], banner: { text: "SIXTH TACKLE!", color: AMBER, sub: surname(names.d[di]) }, cap: "That is the sixth tackle. The attack has run out of phases" });
+    sb.go(900, (q) => {
+      q[did] = { x: end - 1.5, y: p.by };
+      for (let i = 0; i < 5; i++) if (D(i) !== did) q[D(i)] = { x: end - 3 - i * 1.2, y: LANE_D[i] };
+    }, { k: "held", by: did }, { banner: { text: "TURNOVER", color: RED }, cap: "The ball goes to the defence" });
   } else if (type === "turnover") {
     const p = setPlay(c, x0);
     const end = clamp(u1, p.bx + 1, 95);
@@ -720,7 +748,8 @@ function buildFullScene(ev: MatchEvent): Scene | null {
       }, { k: "pass", from: A(2), to: kid, arc: 6 }, { cap: "Pass back to the kicker" });
     }
     const dead = ev.variant === "dead";
-    const land = dead ? { x: 103, y: 0.5 } : { x: clamp(u1, bx + 20, 98), y: 0.5 };
+    const touch = ev.variant === "touch";
+    const land = dead ? { x: 103, y: 0.5 } : touch ? { x: clamp(u1, bx + 15, 96), y: 1.12 } : { x: clamp(u1, bx + 20, 98), y: 0.5 };
     sb.go(750, (q) => {
       q[kid] = { x: bx - 2, y: q[kid].y };
       q[A(1)] = { x: bx - 1, y: 0.66 };
@@ -735,8 +764,20 @@ function buildFullScene(ev: MatchEvent): Scene | null {
       q[A(0)] = { x: land.x - 12, y: 0.4 };
       for (let i = 0; i < 4; i++) q[D(i)] = { x: land.x - 18 + i * 2, y: LANE_D[i] };
       q[D(4)] = { x: Math.min(land.x, 97), y: 0.5 };
-    }, { k: "fly", from: kid, to: land, arc: 80, style: "punt" }, { banner: dead ? undefined : { text: "KICK!", color: GREEN, sub: ev.player }, cap: dead ? "Too long. It is going to run dead." : "A towering kick for territory" });
-    if (dead) {
+    }, { k: "fly", from: kid, to: land, arc: 80, style: "punt" }, { banner: dead ? undefined : touch ? { text: "INTO TOUCH!", color: AMBER, sub: ev.player } : { text: "KICK!", color: GREEN, sub: ev.player }, cap: dead ? "Too long. It is going to run dead." : touch ? "The kick bounces out over the touchline" : "A towering kick for territory" });
+    if (touch) {
+      const lx = land.x;
+      sb.go(1100, (q) => {
+        q[D(2)] = { x: lx + 0.5, y: 1.0 };
+        [0, 1, 3].forEach((i, n) => {
+          q[A(i)] = { x: lx - 1 + n * 2.1, y: 0.83 };
+          q[D(i)] = { x: lx - 1 + n * 2.1, y: 0.73 };
+        });
+        q[A(2)] = { x: lx - 4, y: 0.7 };
+        q[A(4)] = { x: lx - 7, y: 0.6 };
+        q[D(4)] = { x: lx + 6, y: 0.7 };
+      }, { k: "held", by: D(2) }, { banner: { text: "LINE-OUT", color: AMBER, sub: "Defence throws in" }, cap: "Line-out: the defending side throws it in" });
+    } else if (dead) {
       sb.go(900, () => {}, { k: "fly", from: land, to: { x: 106, y: 0.5 }, arc: 10, style: "loose" }, { banner: { text: "DEAD BALL", color: AMBER }, cap: "Over the dead-ball line. Drop-out for the defence." });
     } else {
       sb.go(850, () => {}, { k: "held", by: D(4) }, { banner: { text: "CAUGHT", color: AMBER, sub: surname(names.d[4]) }, cap: "The Sweeper gathers it under pressure" });

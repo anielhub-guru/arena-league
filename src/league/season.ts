@@ -5,11 +5,11 @@ import { describeLine, impact, playerOfTheMatch } from "./awards";
 import { buildSchedule, type Fixture } from "./schedule";
 import { computeStandings, standingsAt } from "./standings";
 import { MATCH_PAY, MAX_BUYS, MONEY_START, fmtMoney, playerValue, prizeFor, sellPrice, teenSalePrice, wageOf } from "./economy";
-import { RESERVE_COUNT, evolvePlayers, generateTeams, makeReserves, initialPotential, makeProspects, overall } from "./teams";
+import { RESERVE_COUNT, evolvePlayers, generateTeams, makeReserves, initialPotential, makeProspects, overall, teamRating } from "./teams";
 
 export { describeLine, impact };
 
-export const SAVE_VERSION = 7;
+export const SAVE_VERSION = 8;
 /** Five starters, three bench, two reserves. */
 export const SQUAD_SIZE = 10;
 
@@ -51,6 +51,22 @@ export interface SeasonRecord {
   season: number;
   championId: string;
   managedPosition: number;
+  /** The club you managed that season. Missing on older saves. */
+  clubId?: string;
+}
+
+/** How the approach is presented, set by your recent results rather than by the club. */
+export type OfferTier = "elite" | "steady" | "lifeline";
+
+/** A chance to take over another club at the end of a season. */
+export interface ClubOffer {
+  clubId: string;
+  tier: OfferTier;
+  mandate: string;
+  /** Bank balance you start with at the new club, in thousands of naira. */
+  budget: number;
+  /** Short squad notes shown on the offer, such as "Ageing core". */
+  tags: string[];
 }
 
 export interface NewsItem {
@@ -78,6 +94,8 @@ export interface SeasonState {
   /** Defensive shape chosen by the human manager. */
   shape: ShapeId;
   training: TrainingFocus;
+  /** Rating points your players gained from training this season, by player id then attribute. Missing on older saves. */
+  trainGains?: Record<string, Partial<Record<Attr, number>>>;
   teams: Team[];
   fixtures: Fixture[];
   /** Next matchday to play (1-based). Greater than totalMatchdays when the season is over. */
@@ -94,6 +112,12 @@ export interface SeasonState {
   money: number;
   /** Offseason decisions waiting on the manager. The new season cannot be played until resolved. */
   intake?: Intake;
+  /** Clubs that want you as their manager. They have to be accepted or turned down before the offseason. */
+  offers?: ClubOffer[];
+  /** The season after which you last had an offer. */
+  lastOfferSeason?: number;
+  /** Strong offers you have turned down since you last moved. Each makes the next approach a little less likely. */
+  declinedTop?: number;
 }
 
 /** Upgrades a saved season from an older version, or returns null if it cannot be upgraded. */
@@ -116,6 +140,7 @@ export function migrateSave(raw: SeasonState): SeasonState | null {
     }
     s.version = 7;
   }
+  if (s.version === 7) s = { ...s, version: 8 };
   if (s.version !== SAVE_VERSION) return null;
   return { ...s, shape: s.shape ?? "sweeper" };
 }
@@ -401,11 +426,14 @@ function train(state: SeasonState, md: number): string[] {
   const team = teamById(state, state.managedId);
   const focus = TRAINING[state.training];
   const out: string[] = [];
-  for (const p of [...team.players].sort(() => rng.next() - 0.5).slice(0, 3)) {
+  // Only players who can still improve are picked, so a maxed-out player never wastes one of the three slots.
+  const open = (p: Player) => overall(p) < (p.potential ?? 99) && focus.attrs.some((a) => p[a] < 95);
+  for (const p of team.players.filter(open).sort(() => rng.next() - 0.5).slice(0, 3)) {
     if (!rng.chance(0.8)) continue;
-    const attr = rng.pick(focus.attrs);
-    if (p[attr] >= 95 || overall(p) >= (p.potential ?? 99)) continue;
+    const attr = rng.pick(focus.attrs.filter((a) => p[a] < 95));
     p[attr]++;
+    const g = ((state.trainGains ??= {})[p.id] ??= {});
+    g[attr] = (g[attr] ?? 0) + 1;
     out.push(`Training: ${p.name} improved ${attr} to ${p[attr]}.`);
   }
   // AI clubs train too, but slower than a manager who is paying attention: one player a week, half the time,
@@ -432,13 +460,14 @@ export function startNextSeason(prev: SeasonState): SeasonState {
   const ids = state.teams.map((t) => t.id);
   const table = standingsAt(ids, state.fixtures, state.totalMatchdays);
   const finish = table.findIndex((r) => r.teamId === state.managedId) + 1;
-  state.history.push({ season: state.season, championId: table[0].teamId, managedPosition: finish });
+  state.history.push({ season: state.season, championId: table[0].teamId, managedPosition: finish, clubId: state.managedId });
   for (const [id, now] of Object.entries(state.seasonStats)) {
     const career = (state.careerStats[id] ??= { ...emptyTotals(), seasons: 0 });
     for (const k of STAT_KEYS) career[k] += now[k];
     if (now.apps > 0) career.seasons++;
   }
   state.seasonStats = {};
+  state.trainGains = {};
   for (const t of state.teams) for (const p of t.players) delete p.tired;
   const news: string[] = [];
   // Season finances: prize money for the finishing position, less the wage bill.
@@ -468,6 +497,12 @@ export function startNextSeason(prev: SeasonState): SeasonState {
     }
   }
   state.intake = buildIntake(state, managedRetirees(state, retirees));
+  const offers = buildOffers(state);
+  if (offers.length) {
+    state.offers = offers;
+    state.lastOfferSeason = state.season - 1;
+    news.push(offers.length > 1 ? `${offers.length} clubs have approached you about the manager's job.` : `${teamById(state, offers[0].clubId).name} have approached you about the manager's job.`);
+  }
   state.fixtures = buildSchedule(ids, state.season);
   state.matchday = 1;
   news.push("The offseason is open: fill your squad, and look at the youth shortlist and the transfer list. The season starts when you confirm.");
@@ -640,6 +675,100 @@ export function completeOffseason(prev: SeasonState, plan: OffseasonPlan): Seaso
   }
   state.money = check.moneyAfter;
   delete state.intake;
+  delete state.offers; // the UI makes you answer first; confirming the offseason anyway means staying
   state.news = [...news.map((text) => ({ season: state.season, matchday: 0, text })), ...state.news].slice(0, 14);
+  return state;
+}
+
+// ------------------------------------------------------------------ job offers
+
+/** At least this many seasons between approaches. */
+const OFFER_MIN_GAP = 2;
+/** After this many seasons without one, a manager doing well is always approached. */
+const OFFER_SURE_GAP = 4;
+
+/**
+ * Offers from other clubs after a season. Never before two seasons are done, and never two years running.
+ * Good results make an approach likely and bring strong clubs; middling ones bring mid-table clubs; poor
+ * ones rarely bring anything, and then only from clubs near the bottom. Deterministic from the save seed.
+ */
+function buildOffers(state: SeasonState): ClubOffer[] {
+  const done = state.season - 1;
+  const hist = state.history;
+  if (hist.length < 2) return [];
+  const gap = done - (state.lastOfferSeason ?? 0);
+  if (gap < OFFER_MIN_GAP) return [];
+  const perf = (2 * hist[hist.length - 1].managedPosition + hist[hist.length - 2].managedPosition) / 3;
+  const tier: OfferTier = perf <= 3 ? "elite" : perf <= 5.5 ? "steady" : "lifeline";
+  const rng = new Rng(hashSeed(state.seed, state.season, "offers"));
+  let chance = tier === "elite" ? 0.45 : tier === "steady" ? 0.3 : 0.1;
+  if (tier !== "lifeline") chance = Math.max(0.15, chance - 0.08 * (state.declinedTop ?? 0));
+  const sure = tier !== "lifeline" && gap >= OFFER_SURE_GAP;
+  if (!sure && !rng.chance(chance)) return [];
+
+  const byRating = [...state.teams].sort((a, b) => teamRating(b) - teamRating(a));
+  const others = byRating.filter((t) => t.id !== state.managedId);
+  // The best clubs only ever come for a manager who is winning; a poor one hears from the bottom three.
+  let pool = tier === "elite" ? others : tier === "steady" ? others.slice(2) : others.slice(-3);
+  const count = tier === "lifeline" ? 1 : rng.chance(tier === "elite" ? 0.3 : 0.2) ? 2 : 1;
+  const out: ClubOffer[] = [];
+  for (let i = 0; i < count && pool.length; i++) {
+    const club = rng.weighted(pool, (t) => Math.max(1, teamRating(t) - 50));
+    pool = pool.filter((t) => t.id !== club.id);
+    out.push(describeOffer(club, byRating.findIndex((t) => t.id === club.id), tier, rng));
+  }
+  return out;
+}
+
+function describeOffer(club: Team, rank: number, tier: OfferTier, rng: Rng): ClubOffer {
+  const mandate = rank < 2 ? "Win the league" : rank < 4 ? "Finish in the top half" : rank < 6 ? "Stay clear of the bottom three" : rng.pick(["Avoid finishing bottom", "Rebuild and stay up"]);
+  const budget = Math.max(1500, Math.round((2200 + (7 - rank) * 700 + rng.int(-500, 500)) / 100) * 100);
+  const tags: string[] = [];
+  const avgAge = club.players.reduce((t, p) => t + p.age, 0) / club.players.length;
+  const room = club.players.reduce((t, p) => t + Math.max(0, (p.potential ?? overall(p)) - overall(p)), 0) / club.players.length;
+  if (avgAge >= 28) tags.push("Ageing core");
+  else if (avgAge <= 24.5) tags.push("Young squad");
+  if (room >= 7) tags.push("Strong youth");
+  const starters = club.lineup.map((id) => club.players.find((p) => p.id === id)!);
+  const weakest = starters.reduce((w, p) => (overall(p) < overall(w) ? p : w));
+  if (overall(weakest) < teamRating(club) - 6) tags.push(`Needs a ${weakest.role}`);
+  if (!tags.length) tags.push("Settled squad");
+  return { clubId: club.id, tier, mandate, budget, tags: tags.slice(0, 2) };
+}
+
+/** Take the job. The club you leave is run by the AI from now on and the squad you join is the one it already has. */
+export function acceptOffer(prev: SeasonState, clubId: string): SeasonState {
+  const offer = prev.offers?.find((o) => o.clubId === clubId);
+  if (!offer) throw new Error("That offer is no longer open");
+  const state = structuredClone(prev);
+  const old = teamById(state, state.managedId);
+  // Players who were about to retire from the club you leave are replaced the way the AI does it.
+  let n = 0;
+  for (const r of old.players.filter((p) => p.retiring)) {
+    const best = makeProspects(old, `${state.season}.t${n++}`, r.role, state.seed).sort((a, b) => (b.potential ?? 0) - (a.potential ?? 0))[0];
+    replacePlayer(old, r.id, best);
+    delete state.careerStats[r.id];
+  }
+  const club = teamById(state, clubId);
+  state.managedId = clubId;
+  state.tactic = club.style;
+  state.shape = SHAPE_BY_STYLE[club.style];
+  state.money = offer.budget;
+  state.trainGains = {};
+  state.declinedTop = 0;
+  delete state.offers;
+  state.intake = buildIntake(state, []);
+  const text = `You leave ${old.name} and take over ${club.name}. Board mandate: ${offer.mandate.toLowerCase()}. Starting balance ${fmtMoney(offer.budget)}.`;
+  state.news = [{ season: state.season, matchday: 0, text }, ...state.news].slice(0, 14);
+  return state;
+}
+
+/** Stay where you are. Turning down a strong offer makes the next approach slightly less likely. */
+export function declineOffers(prev: SeasonState): SeasonState {
+  const state = structuredClone(prev);
+  if (state.offers?.some((o) => o.tier !== "lifeline")) state.declinedTop = (state.declinedTop ?? 0) + 1;
+  delete state.offers;
+  const me = teamById(state, state.managedId);
+  state.news = [{ season: state.season, matchday: 0, text: `You turn down the offers and stay at ${me.name}.` }, ...state.news].slice(0, 14);
   return state;
 }

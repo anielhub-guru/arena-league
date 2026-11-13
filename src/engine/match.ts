@@ -102,7 +102,7 @@ export type TalkId = "fire" | "calm" | "gamble";
 export const TALKS: Record<TalkId, { label: string; description: string }> = {
   fire: { label: "Fire them up", description: "More ambition, a few more mistakes." },
   calm: { label: "Stay calm", description: "Fewer errors, steady carries." },
-  gamble: { label: "Gamble", description: "Could inspire a comeback, could backfire." },
+  gamble: { label: "All in", description: "Could inspire a comeback, could backfire." },
 };
 
 export interface ShapeProfile {
@@ -787,7 +787,9 @@ export class MatchSim {
         this.emit("kick", this.narrator.kickDead(this.facts(A, D, { k: k.name })), true, att, k.name, absX(att, 100), { hl: true, variant: "dead", ai: A.field.indexOf(k) });
         this.give(22);
       } else {
-        this.emit("kick", this.narrator.kickLive(this.facts(A, D, { k: k.name, dist: Math.round(dist), where: place(100 - landed) })), landed >= 88, att, k.name, absX(att, landed), { hl: landed >= 88, variant: "live", ai: A.field.indexOf(k) });
+        const touch = rng.chance(0.08);
+        const text = this.narrator.kickLive(this.facts(A, D, { k: k.name, dist: Math.round(dist), where: place(100 - landed) }));
+        this.emit("kick", touch ? `${text} It bounces into touch and the defence get the line-out.` : text, touch || landed >= 88, att, k.name, absX(att, landed), { hl: touch || landed >= 88, variant: touch ? "touch" : "live", ai: A.field.indexOf(k) });
         this.give(Math.round(100 - landed));
       }
       return;
@@ -892,7 +894,9 @@ export class MatchSim {
       return;
     }
     if (this.tackles >= 6) {
-      this.emit("turnover", this.narrator.sixth(this.facts(A, D, { where })), false, att);
+      // Only worth a highlight when the attack was camped on the line.
+      const deep = this.pos >= 85;
+      this.emit("turnover", this.narrator.sixth(this.facts(A, D, { where })), deep, att, carrier.name, undefined, deep ? { hl: true, variant: "sixth", ai: A.field.indexOf(carrier), di: D.field.indexOf(tackler) } : undefined);
       this.give(100 - this.pos);
       return;
     }
@@ -916,7 +920,9 @@ export class MatchSim {
         this.emit("break", this.narrator.breakEnd("caught", f), true, att, carrier.name, undefined, { hl: true, variant, ai, di: D.field.indexOf(tackler) });
       }
     } else {
-      this.emit("carry", this.narrator.carry(f), false, att, carrier.name);
+      // Stopped just short after starting close to the line: worth a highlight.
+      const heldUp = pos >= 90;
+      this.emit("carry", this.narrator.carry(f), heldUp, att, carrier.name, undefined, heldUp ? { hl: true, variant: "held", ai: A.field.indexOf(carrier), di: D.field.indexOf(tackler) } : undefined);
     }
   }
 }

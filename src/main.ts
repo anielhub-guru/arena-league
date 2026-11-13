@@ -22,23 +22,27 @@ import {
   autoSelect,
   checkPlan,
   completeOffseason,
+  acceptOffer,
+  declineOffers,
+  type ClubOffer,
   type OffseasonPlan,
   SQUAD_SIZE,
 } from "./league/season";
 import { computeStandings, teamForm } from "./league/standings";
-import { TEAM_DEFS, clubObjective, generateTeams, overall, potentialStars, teamRating } from "./league/teams";
+import { TEAM_DEFS, clubObjective, generateTeams, overall, potentialStars, teamColor, teamRating } from "./league/teams";
 import * as store from "./storage";
 import { LiveMatch } from "./viewer/live";
 import { ATTR_NAMES, TACTIC_FOCUS, bestFive, buildRadar, playerProfile, profileOf } from "./viewer/radar";
 import { buildRules } from "./viewer/rules";
 import { buildTable } from "./viewer/table";
 
-type Tab = "overview" | "squad" | "table" | "fixtures";
+type Tab = "overview" | "squad" | "training" | "table" | "fixtures";
 const TABS: [Tab, string][] = [
   ["overview", "1 Overview"],
   ["squad", "2 Squad"],
-  ["table", "3 Table"],
-  ["fixtures", "4 Fixtures"],
+  ["training", "3 Training"],
+  ["table", "4 Table"],
+  ["fixtures", "5 Fixtures"],
 ];
 
 let state: SeasonState | null = null;
@@ -532,6 +536,49 @@ function offseasonCard(s: SeasonState): HTMLElement {
   );
 }
 
+const OFFER_COPY: Record<ClubOffer["tier"], { kicker: string; line: string; stay: string }> = {
+  elite: { kicker: "THE BOARD WANTS YOU", line: "Your results have turned heads. They want a winner and they are ready to back you.", stay: "Stay and keep building" },
+  steady: { kicker: "AN APPROACH", line: "Steady work has been noticed. It is a fair job with fair backing.", stay: "Stay where I am" },
+  lifeline: { kicker: "A LIFELINE", line: "It is not much, and nobody else called. A rebuilding job, with little money.", stay: "Stay and try again" },
+};
+
+/** Job offers from other clubs: accept one, or stay. The look follows how well you have been doing. */
+function offersCard(s: SeasonState): HTMLElement {
+  const me = teamById(s, s.managedId);
+  const mine = teamRating(me);
+  const take = (clubId: string) => {
+    planKey = "";
+    void guarded(async () => void (await persist(acceptOffer(s, clubId))));
+  };
+  const cards = s.offers!.map((o) => {
+    const club = teamById(s, o.clubId);
+    const copy = OFFER_COPY[o.tier];
+    const rating = teamRating(club);
+    const accept = h("button", { class: "primary", disabled: busy }, `Take over ${club.name}`);
+    accept.onclick = () => take(o.clubId);
+    const box = h("div", { class: `offer ${o.tier}` },
+      h("div", { class: "of-kicker" }, copy.kicker),
+      h("div", { class: "of-club" }, club.name),
+      h("div", { class: "dim" }, copy.line),
+      h("div", { class: "of-facts" },
+        h("span", {}, h("b", {}, "Mandate "), o.mandate),
+        h("span", {}, h("b", {}, "Budget "), fmtMoney(o.budget)),
+        h("span", {}, h("b", {}, "Rating "), `${rating} (yours ${mine})`),
+        h("span", {}, h("b", {}, "Squad "), o.tags.join(", "))),
+      h("div", { class: "toolbar" }, accept));
+    box.style.setProperty("--club", teamColor(club.id));
+    return box;
+  });
+  const stay = h("button", { disabled: busy }, `${OFFER_COPY[s.offers![0].tier].stay} at ${me.name}`);
+  stay.onclick = () => void guarded(async () => void (await persist(declineOffers(s))));
+  return card(
+    `Season ${s.season - 1}: job offers`,
+    h("p", { class: "dim" }, "Taking a job moves you to that club with its squad and a new bank balance. Your old club carries on under the computer. Your record stays with you. You can also say no and stay."),
+    ...cards,
+    h("div", { class: "toolbar" }, stay),
+  );
+}
+
 function overviewView(s: SeasonState): HTMLElement {
   const me = teamById(s, s.managedId);
   const ids = s.teams.map((t) => t.id);
@@ -539,7 +586,9 @@ function overviewView(s: SeasonState): HTMLElement {
   const pos = table.findIndex((r) => r.teamId === s.managedId) + 1;
   const left = h("div", { class: "col" });
 
-  if (s.intake) {
+  if (s.offers?.length) {
+    left.append(offersCard(s));
+  } else if (s.intake) {
     left.append(offseasonCard(s));
   } else if (isSeasonOver(s)) {
     const champ = teamById(s, table[0].teamId);
@@ -568,7 +617,7 @@ function overviewView(s: SeasonState): HTMLElement {
         h("div", { class: "dim" }, "Opposition form: ", formChips(s, opp.id)),
         h("div", { class: "dim" }, `Club goal: ${clubObjective(s.managedId, s.history[s.history.length - 1]?.managedPosition)}`),
         h("div", { class: "toolbar" }, watch, sim, sc),
-        h("div", { class: "hint" }, "Set your lineup, tactic and training on the Squad tab first. Watching lets you change tactics, substitute and give a half-time talk as it happens."),
+        h("div", { class: "hint" }, "Set your lineup, tactic on the Squad tab and training on the Training tab first. Watching lets you change tactics, substitute and give a half-time talk as it happens."),
       ),
     );
   }
@@ -680,12 +729,6 @@ function squadView(s: SeasonState): HTMLElement {
     b.onclick = () => void update((x) => void (x.shape = id as ShapeId));
     shapes.append(b);
   }
-  const training = h("div", { class: "choices" });
-  for (const [id, t] of Object.entries(TRAINING)) {
-    const b = h("button", { class: `choice ${s.training === id ? "active" : ""}` }, h("b", {}, t.label), h("span", {}, t.description));
-    b.onclick = () => void update((x) => void (x.training = id as TrainingFocus));
-    training.append(b);
-  }
   return h("div", { class: "col" },
     card(`${team.name} - starting five, bench & reserves`, h("div", { class: "toolbar" }, autoBtn), h("div", { class: "hint" }, hint), playerTable(team, { selectable: true })),
     ...(profileCard ? [profileCard] : []),
@@ -698,9 +741,40 @@ function squadView(s: SeasonState): HTMLElement {
       ...(advice ? [h("div", { class: "advice" }, `Next opponent ${opp!.name}: ${advice.why}`)] : []),
       shapes,
     ),
-    h("div", { class: "grid" },
-      card("Your tactic", h("div", { class: "advice" }, `Attacking needs pace and handling. Your starting five averages ${skill} (62 is neutral, 72 is ideal), so ${fitText}. A poorly suited side that attacks makes errors and gets countered when it loses the ball.`), tactics),
-      card("Training focus", h("div", { class: "hint" }, "After each matchday three players get a chance to improve in this area."), training)),
+    card("Your tactic", h("div", { class: "advice" }, `Attacking needs pace and handling. Your starting five averages ${skill} (62 is neutral, 72 is ideal), so ${fitText}. A poorly suited side that attacks makes errors and gets countered when it loses the ball.`), tactics),
+  );
+}
+
+/** Training tab: pick the focus and see how each player has grown this season. */
+function trainingView(s: SeasonState): HTMLElement {
+  const team = teamById(s, s.managedId);
+  const focus = h("div", { class: "choices" });
+  for (const [id, t] of Object.entries(TRAINING)) {
+    const b = h("button", { class: `choice ${s.training === id ? "active" : ""}` }, h("b", {}, t.label), h("span", {}, t.description));
+    b.onclick = () => void update((x) => void (x.training = id as TrainingFocus));
+    focus.append(b);
+  }
+  const gains = s.trainGains ?? {};
+  const t = h("table", { class: "squad stats" });
+  t.append(h("thead", {}, h("tr", {}, h("th", { class: "club" }, "Player"), h("th", {}, "Age"), h("th", { title: "Average of the six ratings" }, "Overall"), h("th", { title: "Potential: the ceiling training cannot lift a player past" }, "Pot"), h("th", { title: "Rating points gained from training this season" }, "Trained"), ...ATTRS.map((a) => h("th", { title: ATTR_INFO[a][1] }, ATTR_INFO[a][0])))));
+  const body = h("tbody");
+  const total = (id: string) => Object.values(gains[id] ?? {}).reduce((n, v) => n + (v ?? 0), 0);
+  for (const p of [...team.players].sort((a, b) => total(b.id) - total(a.id) || overall(b) - overall(a))) {
+    const g = gains[p.id] ?? {};
+    const n = total(p.id);
+    const capped = overall(p) >= (p.potential ?? 99);
+    body.append(h("tr", {},
+      h("td", { class: "club" }, p.name),
+      h("td", {}, String(p.age)),
+      h("td", {}, String(overall(p))),
+      h("td", { title: capped ? "At potential: training can no longer improve this player" : "" }, stars(p.potential ?? 0) + (capped ? " max" : "")),
+      h("td", { class: n ? "mv up" : "mv same" }, n ? `+${n}` : "0"),
+      ...ATTRS.map((a) => h("td", {}, String(p[a]), g[a] ? h("span", { class: "mv up" }, ` +${g[a]}`) : ""))));
+  }
+  t.append(body);
+  return h("div", { class: "col" },
+    card("Training focus", h("div", { class: "hint" }, "After each matchday three players get a chance to improve in this area."), focus),
+    card(`Player progress, season ${s.season}`, h("div", { class: "hint" }, "Gains from training since the season began, best first. Ratings also shift between seasons as players age. A player at their potential stops improving."), t),
   );
 }
 
@@ -836,6 +910,7 @@ function render() {
   const body = h("main");
   if (tab === "overview") body.append(overviewView(s));
   else if (tab === "squad") body.append(squadView(s));
+  else if (tab === "training") body.append(trainingView(s));
   else if (tab === "table") body.append(card("League table", buildTable(s, { onClub: (id) => (id === s.managedId ? undefined : scout(s, id)) }), h("div", { class: "hint" }, "▲▼ = places moved since the previous matchday. Win 4, draw 2, +1 for 3+ tries (TF), +1 for losing by 7 or fewer (BP). Click a club to scout it.")));
   else body.append(fixturesView(s));
   app.append(body);
