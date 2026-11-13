@@ -124,7 +124,7 @@ After each matchday the app writes full match logs first, then the season, to th
 - Windows: `%LOCALAPPDATA%\com.dominionleague.manager\`
 - Linux: `~/.local/share/com.dominionleague.manager/`
 
-Contents: `season.json` and `matches/<fixtureId>.json`. Each write keeps the previous save as `season.bak.json`. Saves from versions 3 to 5 are upgraded on load; older ones are not compatible. The path is shown in the footer. In a plain browser (`npm run dev` without Tauri) it falls back to localStorage.
+Contents: `saves/<game>/season.json` and `saves/<game>/matches/<fixtureId>.json`. Each game has its own folder, and each write keeps the previous save as `season.bak.json`. The start screen lists saved games with Continue and Delete; an old single save is moved into the first slot. Saves from versions 3 to 5 are upgraded on load; older ones are not compatible. The path is shown in the footer. In a plain browser (`npm run dev` without Tauri) it falls back to localStorage.
 
 ## Installation & development
 

@@ -4,6 +4,7 @@ use tauri::{AppHandle, Manager};
 
 const SAVE_FILE: &str = "season.json";
 const MATCH_DIR: &str = "matches";
+const SAVES_DIR: &str = "saves";
 
 fn root(app: &AppHandle) -> Result<PathBuf, String> {
     app.path().app_local_data_dir().map_err(|e| e.to_string())
@@ -40,47 +41,84 @@ fn read_optional(path: &Path) -> Result<Option<String>, String> {
     }
 }
 
-#[tauri::command]
-fn load_save(app: AppHandle) -> Result<Option<String>, String> {
-    read_optional(&root(&app)?.join(SAVE_FILE))
+/// One folder per saved game: saves/<slot>/season.json and saves/<slot>/matches/.
+fn slot_dir(app: &AppHandle, slot: &str) -> Result<PathBuf, String> {
+    if !valid_id(slot) {
+        return Err("invalid save slot".into());
+    }
+    Ok(root(app)?.join(SAVES_DIR).join(slot))
 }
 
 #[tauri::command]
-fn write_save(app: AppHandle, json: String) -> Result<(), String> {
-    let path = root(&app)?.join(SAVE_FILE);
+fn list_saves(app: AppHandle) -> Result<Vec<String>, String> {
+    let dir = root(&app)?.join(SAVES_DIR);
+    let mut slots = Vec::new();
+    match fs::read_dir(&dir) {
+        Ok(entries) => {
+            for e in entries.flatten() {
+                let name = e.file_name().to_string_lossy().to_string();
+                if valid_id(&name) && e.path().join(SAVE_FILE).exists() {
+                    slots.push(name);
+                }
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.to_string()),
+    }
+    slots.sort();
+    Ok(slots)
+}
+
+#[tauri::command]
+fn load_save(app: AppHandle, slot: String) -> Result<Option<String>, String> {
+    read_optional(&slot_dir(&app, &slot)?.join(SAVE_FILE))
+}
+
+#[tauri::command]
+fn write_save(app: AppHandle, slot: String, json: String) -> Result<(), String> {
+    let path = slot_dir(&app, &slot)?.join(SAVE_FILE);
     backup_previous(&path);
     atomic_write(&path, &json)
 }
 
 #[tauri::command]
-fn write_match_log(app: AppHandle, id: String, json: String) -> Result<(), String> {
+fn write_match_log(app: AppHandle, slot: String, id: String, json: String) -> Result<(), String> {
     if !valid_id(&id) {
         return Err("invalid match id".into());
     }
-    atomic_write(&root(&app)?.join(MATCH_DIR).join(format!("{id}.json")), &json)
+    atomic_write(&slot_dir(&app, &slot)?.join(MATCH_DIR).join(format!("{id}.json")), &json)
 }
 
 #[tauri::command]
-fn read_match_log(app: AppHandle, id: String) -> Result<Option<String>, String> {
+fn read_match_log(app: AppHandle, slot: String, id: String) -> Result<Option<String>, String> {
     if !valid_id(&id) {
         return Err("invalid match id".into());
     }
-    read_optional(&root(&app)?.join(MATCH_DIR).join(format!("{id}.json")))
+    read_optional(&slot_dir(&app, &slot)?.join(MATCH_DIR).join(format!("{id}.json")))
 }
 
+/// Deletes one saved game (its season, backup and match logs). Other saves are untouched.
 #[tauri::command]
-fn reset_save(app: AppHandle) -> Result<(), String> {
-    let dir = root(&app)?;
-    match fs::remove_file(dir.join(SAVE_FILE)) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e.to_string()),
-    }
-    match fs::remove_dir_all(dir.join(MATCH_DIR)) {
+fn delete_save(app: AppHandle, slot: String) -> Result<(), String> {
+    match fs::remove_dir_all(slot_dir(&app, &slot)?) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e.to_string()),
     }
+}
+
+/// Moves the old single save (season.json + matches/) into the first save slot. Best effort, runs once.
+fn migrate_single_save(root: &Path) {
+    if !root.join(SAVE_FILE).exists() {
+        return;
+    }
+    let slot = root.join(SAVES_DIR).join("game-1");
+    if slot.exists() || fs::create_dir_all(&slot).is_err() {
+        return;
+    }
+    let _ = fs::rename(root.join(SAVE_FILE), slot.join(SAVE_FILE));
+    let _ = fs::rename(root.join("season.bak.json"), slot.join("season.bak.json"));
+    let _ = fs::rename(root.join(MATCH_DIR), slot.join(MATCH_DIR));
 }
 
 #[tauri::command]
@@ -107,7 +145,7 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
 /// One-time migration from the pre-rename data folder (com.arenaleague.manager).
 /// Copies (never moves) so the old data stays as a backup. Best effort: never blocks startup.
 fn migrate_legacy_data(current: &Path) {
-    if current.join(SAVE_FILE).exists() {
+    if current.join(SAVE_FILE).exists() || current.join(SAVES_DIR).exists() {
         return;
     }
     if let Some(parent) = current.parent() {
@@ -124,10 +162,11 @@ pub fn run() {
         .setup(|app| {
             if let Ok(dir) = app.path().app_local_data_dir() {
                 migrate_legacy_data(&dir);
+                migrate_single_save(&dir);
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load_save, write_save, write_match_log, read_match_log, reset_save, data_dir])
+        .invoke_handler(tauri::generate_handler![list_saves, load_save, write_save, write_match_log, read_match_log, delete_save, data_dir])
         .run(tauri::generate_context!())
         .expect("error while running Dominion League Manager");
 }
@@ -172,6 +211,19 @@ mod tests {
         migrate_legacy_data(&current); // must not overwrite
         assert_eq!(read_optional(&current.join(SAVE_FILE)).unwrap().as_deref(), Some("{\"new\":1}"));
         fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn single_save_moves_into_first_slot() {
+        let dir = std::env::temp_dir().join(format!("dominion-slot-{}", std::process::id()));
+        atomic_write(&dir.join(SAVE_FILE), "{\"s\":1}").unwrap();
+        atomic_write(&dir.join(MATCH_DIR).join("m.json"), "{}").unwrap();
+        migrate_single_save(&dir);
+        let slot = dir.join(SAVES_DIR).join("game-1");
+        assert_eq!(read_optional(&slot.join(SAVE_FILE)).unwrap().as_deref(), Some("{\"s\":1}"));
+        assert!(slot.join(MATCH_DIR).join("m.json").exists());
+        assert!(!dir.join(SAVE_FILE).exists());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

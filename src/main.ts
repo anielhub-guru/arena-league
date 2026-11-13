@@ -101,7 +101,7 @@ const startNew = (teamId: string) =>
     if (!pickGender) return;
     // Clubs are fixed; players are generated from this random seed, so every new game differs.
     const seed = (crypto.getRandomValues(new Uint32Array(1))[0] || 1) >>> 0;
-    await store.resetSave();
+    store.setSlot(store.newSlotId());
     await persist(newGame(seed, teamId, pickGender));
     tab = "overview";
   });
@@ -222,25 +222,61 @@ function swapPlayers(a: string, b: string) {
   });
 }
 
-let newGameArmed = false;
+/** Back to the start screen. Nothing is lost: every game is saved automatically and listed there. */
 function newGameFlow() {
-  // The desktop webview blocks window.confirm, so confirm in the page: first click arms, second click proceeds.
-  if (!newGameArmed) {
-    newGameArmed = true;
-    render();
-    setTimeout(() => {
-      if (newGameArmed) {
-        newGameArmed = false;
-        render();
-      }
-    }, 5000);
-    return;
-  }
-  newGameArmed = false;
   state = null;
   pickGender = null;
-  render();
+  void refreshSaves().then(render);
 }
+
+interface SaveInfo {
+  slot: string;
+  title: string;
+  detail: string;
+  ok: boolean;
+}
+let saves: SaveInfo[] = [];
+/** Save whose delete button has been clicked once. A second click deletes it. */
+let deleteArmed = "";
+
+async function refreshSaves() {
+  const out: SaveInfo[] = [];
+  const last = store.lastSlot();
+  for (const slot of await store.listSaves().catch(() => [] as string[])) {
+    try {
+      const s = migrateSave(JSON.parse((await store.loadSave(slot)) ?? "null") as SeasonState);
+      if (!s) throw new Error("older version");
+      const md = Math.min(s.matchday, s.totalMatchdays);
+      out.push({ slot, ok: true, title: teamById(s, s.managedId).name, detail: `${s.gender === "women" ? "Women's" : "Men's"} league · Season ${s.season} · Matchday ${md} of ${s.totalMatchdays}` });
+    } catch {
+      out.push({ slot, ok: false, title: "Unreadable save", detail: "It may be from an older version. You can delete it." });
+    }
+  }
+  out.sort((a, b) => Number(b.slot === last) - Number(a.slot === last));
+  saves = out;
+}
+
+const loadGame = (slot: string) =>
+  guarded(async () => {
+    const s = migrateSave(JSON.parse((await store.loadSave(slot)) ?? "null") as SeasonState);
+    if (!s) throw new Error("this save is from a version the game cannot upgrade");
+    store.setSlot(slot);
+    state = s;
+    tab = "overview";
+  });
+
+const deleteGame = (slot: string) => {
+  if (deleteArmed !== slot) {
+    deleteArmed = slot;
+    render();
+    return;
+  }
+  deleteArmed = "";
+  return guarded(async () => {
+    await store.deleteSave(slot);
+    await refreshSaves();
+  });
+};
 
 // ------------------------------------------------------------------ views
 
@@ -716,6 +752,17 @@ function pickerView(): HTMLElement {
     }
     box.append(grid);
     box.append(h("p", { class: "dim" }, "The clubs are fixed. The players are generated fresh every time you start a new game, so each game has different squads and stars."), help);
+    if (saves.length) {
+      const list = h("div", { class: "saves" }, h("p", { class: "select-tag" }, "SAVED GAMES"));
+      for (const sv of saves) {
+        const open = h("button", { class: "primary", disabled: !sv.ok || busy }, "Continue");
+        open.onclick = () => void loadGame(sv.slot);
+        const del = h("button", { class: deleteArmed === sv.slot ? "primary" : "ghost", disabled: busy }, deleteArmed === sv.slot ? "Click again to delete" : "Delete");
+        del.onclick = () => void deleteGame(sv.slot);
+        list.append(h("div", { class: "save-row" }, h("div", { class: "save-info" }, h("b", {}, sv.title), h("span", { class: "dim" }, sv.detail)), open, del));
+      }
+      box.append(list);
+    }
     return box;
   }
 
@@ -772,11 +819,7 @@ function render() {
   quick.onclick = () => void quickSim();
   const watch = h("button", { class: "primary cta", disabled: busy || over }, "▶ Watch match");
   watch.onclick = watchMatch;
-<<<<<<< Updated upstream
-  const newBtn = h("button", { class: "ghost", title: "Start a new game" }, "New game");
-=======
-  const newBtn = h("button", { class: newGameArmed ? "primary" : "" }, newGameArmed ? "Click again to abandon this save" : "New game");
->>>>>>> Stashed changes
+  const newBtn = h("button", { class: "ghost", title: "Saved games and new game. This game is already saved." }, "Games");
   newBtn.onclick = newGameFlow;
   const helpBtn = h("button", { class: "icon", title: "How to play" }, "?");
   helpBtn.onclick = showRules;
@@ -784,7 +827,7 @@ function render() {
   const more = h("details", { class: "more" }, h("summary", { title: "More actions" }, "⋯"));
   const menuQuick = h("button", { disabled: busy || over }, "Quick sim");
   menuQuick.onclick = () => void quickSim();
-  const menuNew = h("button", {}, "New game");
+  const menuNew = h("button", {}, "Games");
   menuNew.onclick = newGameFlow;
   more.append(h("div", { class: "menu" }, menuQuick, menuNew));
   const meta = h("div", { class: "hclub", title: `${club.name} · ${s.gender === "women" ? "Women's" : "Men's"} League · Season ${s.season}` }, h("span", { class: "crest" }, club.name.charAt(0)), h("div", { class: "who" }, h("b", {}, club.name), h("span", {}, `${s.gender === "women" ? "Women's" : "Men's"} League · Season ${s.season}`)));
@@ -841,15 +884,19 @@ document.addEventListener("keydown", (e) => {
 async function boot() {
   dir = await store.dataDir().catch(() => "");
   try {
-    const raw = await store.loadSave();
-    if (raw) {
-      const parsed = JSON.parse(raw) as SeasonState;
-      const upgraded = migrateSave(parsed);
-      if (!upgraded) throw new Error(`save is from an older version (${parsed.version}) that this build cannot upgrade`);
-      state = upgraded;
+    await refreshSaves();
+    // Resume the game played last; with none, the start screen lists every save.
+    const last = store.lastSlot();
+    const target = saves.find((x) => x.slot === last && x.ok);
+    if (target) {
+      const s = migrateSave(JSON.parse((await store.loadSave(target.slot)) ?? "null") as SeasonState);
+      if (s) {
+        store.setSlot(target.slot);
+        state = s;
+      }
     }
   } catch (e) {
-    error = `Could not read saved season (${e instanceof Error ? e.message : String(e)}). Picking a club will start a new game and overwrite it. The previous save, if any, is kept as season.bak.json in the data folder.`;
+    error = `Could not read saved games (${e instanceof Error ? e.message : String(e)}).`;
   }
   render();
   // First launch: show the guide once so a new player can learn the sport before picking a club.

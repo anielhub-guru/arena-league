@@ -379,7 +379,6 @@ td.stars { color: #e3cf7a; letter-spacing: 1px; white-space: nowrap; }
 .r-table td { font-variant-numeric: tabular-nums; }
 td.club.link { cursor: pointer; text-decoration: underline dotted var(--dim); text-underline-offset: 3px; }
 
-<<<<<<< Updated upstream
 .picker button.pick .pick-info, .picker button.pick .pick-goal { margin-left: 16px; }
 .playclock { position: fixed; right: 10px; bottom: 6px; z-index: 50; font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; background: var(--bg, #0d1117); padding: 2px 8px; border-radius: 4px; pointer-events: none; }
 
@@ -394,6 +393,7 @@ td.club.link { cursor: pointer; text-decoration: underline dotted var(--dim); te
 @keyframes trophy-pop { from { transform: scale(.2) rotate(-25deg); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes champ-glow { from { box-shadow: 0 0 14px -6px #e8c14a88, inset 0 0 0 1px #e8c14a33; } to { box-shadow: 0 0 28px -4px #e8c14acc, inset 0 0 0 1px #e8c14a66; } }
 @media (prefers-reduced-motion: reduce) { .news .news-title, .trophy { animation: none; } }
-=======
-.picker button.pick .pick-info { margin-left: 16px; }
->>>>>>> Stashed changes
+
+.saves { margin-top: 24px; }
+.save-row { display: flex; align-items: center; gap: 8px; padding: 10px 12px; margin-bottom: 8px; border: 1px solid var(--line, #2a3a33); border-radius: 6px; }
+.save-info { flex: 1; display: flex; flex-direction: column; gap: 2px; }
