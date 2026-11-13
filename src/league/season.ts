@@ -3,6 +3,7 @@ import { MatchSim, RED_BAN, SHAPE_BY_STYLE, attackFit, slotPlayer } from "../eng
 import { STAT_KEYS, emptyTotals, ROLES, type Attr, type Gender, type MatchLog, type Player, type PlayerTotals, type Role, type ShapeId, type TacticId, type Team } from "../engine/types";
 import { describeLine, impact, playerOfTheMatch } from "./awards";
 import { buildSchedule, type Fixture } from "./schedule";
+import { recordMeeting, rivalNotes, rivalOf, type Rivalry } from "./rivals";
 import { computeStandings, standingsAt } from "./standings";
 import { MATCH_PAY, MAX_BUYS, MONEY_START, fmtMoney, playerValue, prizeFor, sellPrice, teenSalePrice, wageOf } from "./economy";
 import { RESERVE_COUNT, evolvePlayers, generateTeams, makeReserves, initialPotential, makeProspects, overall, teamRating } from "./teams";
@@ -104,6 +105,8 @@ export interface SeasonState {
   history: SeasonRecord[];
   /** Newest first. */
   news: NewsItem[];
+  /** Head-to-head records for every pair of clubs. Missing on older saves. */
+  rivalry?: Rivalry;
   /** This season's counting stats by player id (every club). */
   seasonStats: Record<string, PlayerTotals>;
   /** Completed seasons, by player id. Add the current season for a full career line. */
@@ -197,6 +200,8 @@ export function aiTactic(team: Team): TacticId {
 export function buildSim(s: SeasonState, f: Fixture, live = false): MatchSim {
   const home = teamById(s, f.homeId);
   const away = teamById(s, f.awayId);
+  const rival = rivalOf(s.rivalry, s.managedId);
+  const involved = (home.id === s.managedId && away.id === rival) || (away.id === s.managedId && home.id === rival);
   return new MatchSim({
     id: f.id,
     season: s.season,
@@ -212,6 +217,7 @@ export function buildSim(s: SeasonState, f: Fixture, live = false): MatchSim {
     awayAiSubs: away.id !== s.managedId,
     homeAuto: !(live && home.id === s.managedId),
     awayAuto: !(live && away.id === s.managedId),
+    ...(involved ? { rival: rivalNotes(s.rivalry, s.managedId, rival!, teamById(s, rival!).name, home.id === s.managedId) } : {}),
     seed: hashSeed(s.seed, s.season, f.id),
   });
 }
@@ -242,6 +248,10 @@ export function playMatchday(prev: SeasonState, managedLog?: MatchLog): { state:
   }
 
   const md = state.matchday;
+  // Which club was your rival going into this round, so the news matches what the commentary said.
+  const rivalBefore = rivalOf(state.rivalry, state.managedId);
+  state.rivalry ??= {};
+  for (const l of logs) recordMeeting(state.rivalry, l.homeId, l.awayId, l.homeScore, l.awayScore);
   const news: string[] = [];
   const mine = logs.find((l) => l.homeId === state.managedId || l.awayId === state.managedId);
   if (mine) {
@@ -257,6 +267,9 @@ export function playMatchday(prev: SeasonState, managedLog?: MatchLog): { state:
     const move = md === 1 ? `Now ${ord(now)}.` : now < was ? `Up to ${ord(now)}.` : now > was ? `Down to ${ord(now)}.` : `Holding ${ord(now)}.`;
     news.push(`${verb} ${pf}-${pa} ${home ? "vs" : "at"} ${opp}. ${move} Match winnings ${fmtMoney(pay)}.`);
     if (now === 1 && was !== 1) news.push("You have gone top of the table.");
+    const oppId = home ? mine.awayId : mine.homeId;
+    if (rivalBefore === oppId) news.push(pf > pa ? `Bragging rights: you beat your rivals ${opp}.` : pf < pa ? `Your rivals ${opp} get the better of you.` : `Honours even with your rivals ${opp}.`);
+    else if (!rivalBefore && rivalOf(state.rivalry, state.managedId) === oppId) news.push(`${opp} have become your rivals.`);
   }
   news.push(...recordPlayers(state, logs));
   applyLoad(state, logs);
@@ -428,7 +441,7 @@ function train(state: SeasonState, md: number): string[] {
   const out: string[] = [];
   // Only players who can still improve are picked, so a maxed-out player never wastes one of the three slots.
   const open = (p: Player) => overall(p) < (p.potential ?? 99) && focus.attrs.some((a) => p[a] < 95);
-  for (const p of team.players.filter(open).sort(() => rng.next() - 0.5).slice(0, 3)) {
+  for (const p of rng.shuffle(team.players.filter(open)).slice(0, 3)) {
     if (!rng.chance(0.8)) continue;
     const attr = rng.pick(focus.attrs.filter((a) => p[a] < 95));
     p[attr]++;
@@ -682,6 +695,16 @@ export function completeOffseason(prev: SeasonState, plan: OffseasonPlan): Seaso
 
 // ------------------------------------------------------------------ job offers
 
+/** Seasons you finished with the club you manage now. Older saves did not record the club, so those count. */
+export function recordsAtCurrentClub(state: SeasonState): SeasonRecord[] {
+  return state.history.filter((r) => !r.clubId || r.clubId === state.managedId);
+}
+
+/** Your last finish at the club you manage now, or undefined if you have not finished a season there. */
+export function lastFinishHere(state: SeasonState): number | undefined {
+  return recordsAtCurrentClub(state).at(-1)?.managedPosition;
+}
+
 /** At least this many seasons between approaches. */
 const OFFER_MIN_GAP = 2;
 /** After this many seasons without one, a manager doing well is always approached. */
@@ -698,7 +721,10 @@ function buildOffers(state: SeasonState): ClubOffer[] {
   if (hist.length < 2) return [];
   const gap = done - (state.lastOfferSeason ?? 0);
   if (gap < OFFER_MIN_GAP) return [];
-  const perf = (2 * hist[hist.length - 1].managedPosition + hist[hist.length - 2].managedPosition) / 3;
+  const recent = recordsAtCurrentClub(state).slice(-2);
+  if (!recent.length) return [];
+  // Latest finish counts double; after a move only the seasons at the new club count.
+  const perf = recent.length === 2 ? (2 * recent[1].managedPosition + recent[0].managedPosition) / 3 : recent[0].managedPosition;
   const tier: OfferTier = perf <= 3 ? "elite" : perf <= 5.5 ? "steady" : "lifeline";
   const rng = new Rng(hashSeed(state.seed, state.season, "offers"));
   let chance = tier === "elite" ? 0.45 : tier === "steady" ? 0.3 : 0.1;

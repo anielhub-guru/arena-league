@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { acceptOffer, autoPlan, completeOffseason, declineOffers, isSeasonOver, newGame, playMatchday, startNextSeason, teamById, type SeasonState } from "../src/league/season";
+import { Rng } from "../src/engine/rng";
+import { clubObjective } from "../src/league/teams";
+import { acceptOffer, lastFinishHere, autoPlan, completeOffseason, declineOffers, isSeasonOver, newGame, playMatchday, startNextSeason, teamById, type SeasonState } from "../src/league/season";
 import { teamRating } from "../src/league/teams";
 import { ROLES } from "../src/engine/types";
 import { overall } from "../src/league/teams";
@@ -76,4 +78,36 @@ describe("job offers", () => {
     const b = run(5, 8, declineOffers).rounds.map((r) => [r.season, r.offers.map((o) => o.clubId)]);
     expect(a).toEqual(b);
   }, 120_000);
+
+  it("after a move, only your record at the new club counts", () => {
+    let s = newGame(11, "ash");
+    for (let i = 0; i < 30; i++) {
+      s = startNextSeason(playSeason(s));
+      if (s.offers?.length) {
+        s = acceptOffer(s, s.offers[0].clubId);
+        expect(lastFinishHere(s)).toBeUndefined();
+        expect(clubObjective(s.managedId, lastFinishHere(s))).not.toBe("Defend the title");
+        s = completeOffseason(s, autoPlan(s));
+        s = startNextSeason(playSeason(s));
+        expect(s.history.at(-1)!.clubId).toBe(s.managedId);
+        expect(lastFinishHere(s)).toBe(s.history.at(-1)!.managedPosition);
+        // one season at the new club is never enough for another approach
+        expect(s.offers).toBeUndefined();
+        return;
+      }
+      s = completeOffseason(s, autoPlan(s));
+    }
+    throw new Error("no offer in 30 seasons");
+  }, 120_000);
+
+  it("shuffle keeps every item and is not biased toward the original order", () => {
+    const rng = new Rng(7);
+    const first = [0, 0, 0, 0];
+    for (let i = 0; i < 4000; i++) {
+      const out = rng.shuffle([0, 1, 2, 3]);
+      expect([...out].sort()).toEqual([0, 1, 2, 3]);
+      first[out[0]]++;
+    }
+    for (const c of first) expect(c).toBeGreaterThan(850);
+  });
 });

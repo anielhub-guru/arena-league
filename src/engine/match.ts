@@ -1,4 +1,5 @@
 import { Narrator, type CardFacts, type Facts } from "./commentary";
+import type { RivalNotes } from "../league/rivals";
 import { Rng, hashSeed } from "./rng";
 import { ROLES, emptyTotals } from "./types";
 import type { Attr, EventType, MatchEvent, MatchLog, Player, PlayerLine, Role, ShapeId, TacticId, Team, TeamStats } from "./types";
@@ -167,6 +168,8 @@ export interface MatchInput {
   /** True when the game also makes this club's substitutions (AI clubs). Off for the manager and in plain tests. */
   homeAiSubs?: boolean;
   awayAiSubs?: boolean;
+  /** Set when the managed club is playing its rival. Only changes the wording. */
+  rival?: RivalNotes;
   seed: number;
 }
 
@@ -317,7 +320,7 @@ export class MatchSim {
     ];
     this.coaches = [makeCoach(input.seed, input.home.id), makeCoach(input.seed, input.away.id)];
     this.sides.forEach((s, i) => s.field.forEach((p) => this.line(s, i as 0 | 1, p)));
-    this.emit("kickoff", `${input.home.name} get us under way against ${input.away.name}. The ball is in play at the Dominion Arena.`, true, 0);
+    this.emit("kickoff", `${input.home.name} get us under way against ${input.away.name}. The ball is in play at the Dominion Arena.${input.rival ? ` ${input.rival.kickoff}` : ""}`, true, 0);
   }
 
   get minute(): number {
@@ -520,7 +523,10 @@ export class MatchSim {
       const [h, a] = this.sides;
       const verdict = h.score === a.score ? "It finishes level" : `${h.score > a.score ? home.name : away.name} take the win`;
       this.x0 = absX(this.att, this.pos);
-      this.emit("fulltime", `FULL TIME. ${home.name} ${h.score} - ${a.score} ${away.name}. ${verdict}.`, true);
+      const rv = this.input.rival;
+      const mine = rv ? (rv.managedIsHome ? h.score - a.score : a.score - h.score) : 0;
+      const tail = rv ? ` ${mine > 0 ? rv.fulltime.win : mine < 0 ? rv.fulltime.loss : rv.fulltime.draw}.` : "";
+      this.emit("fulltime", `FULL TIME. ${home.name} ${h.score} - ${a.score} ${away.name}. ${verdict}.${tail}`, true);
       this.finished = true;
       return;
     }
@@ -920,8 +926,9 @@ export class MatchSim {
         this.emit("break", this.narrator.breakEnd("caught", f), true, att, carrier.name, undefined, { hl: true, variant, ai, di: D.field.indexOf(tackler) });
       }
     } else {
-      // Stopped just short after starting close to the line: worth a highlight.
-      const heldUp = pos >= 90;
+      // Stopped just short on the line, or after several phases camped close to it: worth a highlight.
+      // Most near-line stops are ordinary carries, so this stays rare enough to feel like a moment.
+      const heldUp = pos >= 94 || (pos >= 90 && this.tackles >= 3);
       this.emit("carry", this.narrator.carry(f), heldUp, att, carrier.name, undefined, heldUp ? { hl: true, variant: "held", ai: A.field.indexOf(carrier), di: D.field.indexOf(tackler) } : undefined);
     }
   }

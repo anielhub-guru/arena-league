@@ -23,6 +23,7 @@ import {
   checkPlan,
   completeOffseason,
   acceptOffer,
+  lastFinishHere,
   declineOffers,
   type ClubOffer,
   type OffseasonPlan,
@@ -536,10 +537,10 @@ function offseasonCard(s: SeasonState): HTMLElement {
   );
 }
 
-const OFFER_COPY: Record<ClubOffer["tier"], { kicker: string; line: string; stay: string }> = {
-  elite: { kicker: "THE BOARD WANTS YOU", line: "Your results have turned heads. They want a winner and they are ready to back you.", stay: "Stay and keep building" },
-  steady: { kicker: "AN APPROACH", line: "Steady work has been noticed. It is a fair job with fair backing.", stay: "Stay where I am" },
-  lifeline: { kicker: "A LIFELINE", line: "It is not much, and nobody else called. A rebuilding job, with little money.", stay: "Stay and try again" },
+const OFFER_COPY: Record<ClubOffer["tier"], { kicker: string; line: string; stay: (club: string) => string }> = {
+  elite: { kicker: "THE BOARD WANTS YOU", line: "Your results have turned heads. They want a winner and they are ready to back you.", stay: (c) => `Stay at ${c} and keep building` },
+  steady: { kicker: "AN APPROACH", line: "Steady work has been noticed. It is a fair job with fair backing.", stay: (c) => `Stay at ${c}` },
+  lifeline: { kicker: "A LIFELINE", line: "It is not much, and nobody else called. A rebuilding job, with little money.", stay: (c) => `Stay at ${c} and try again` },
 };
 
 /** Job offers from other clubs: accept one, or stay. The look follows how well you have been doing. */
@@ -569,7 +570,7 @@ function offersCard(s: SeasonState): HTMLElement {
     box.style.setProperty("--club", teamColor(club.id));
     return box;
   });
-  const stay = h("button", { disabled: busy }, `${OFFER_COPY[s.offers![0].tier].stay} at ${me.name}`);
+  const stay = h("button", { disabled: busy }, OFFER_COPY[s.offers![0].tier].stay(me.name));
   stay.onclick = () => void guarded(async () => void (await persist(declineOffers(s))));
   return card(
     `Season ${s.season - 1}: job offers`,
@@ -615,7 +616,7 @@ function overviewView(s: SeasonState): HTMLElement {
           h("div", { class: "side" }, h("b", {}, home ? opp.name : me.name), h("div", { class: "dim" }, home ? `${ordinal(oppPos)}` : `${ordinal(pos)}`))),
         h("div", { class: "dim" }, `${home ? "Home" : "Away"}  |  Your tactic: ${TACTICS[s.tactic].label}  |  Shape: ${SHAPES[s.shape].label}  |  Rating ${teamRating(me)} v ${teamRating(opp)}`),
         h("div", { class: "dim" }, "Opposition form: ", formChips(s, opp.id)),
-        h("div", { class: "dim" }, `Club goal: ${clubObjective(s.managedId, s.history[s.history.length - 1]?.managedPosition)}`),
+        h("div", { class: "dim" }, `Club goal: ${clubObjective(s.managedId, lastFinishHere(s))}`),
         h("div", { class: "toolbar" }, watch, sim, sc),
         h("div", { class: "hint" }, "Set your lineup, tactic on the Squad tab and training on the Training tab first. Watching lets you change tactics, substitute and give a half-time talk as it happens."),
       ),

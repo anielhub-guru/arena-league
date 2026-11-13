@@ -661,14 +661,37 @@ function buildFullScene(ev: MatchEvent): Scene | null {
     const p = setPlay(c, x0);
     const end = clamp(u1, p.bx + 1, 98.5);
     burstTo(c, ai, p.bx, end, p.by, { depth: 4, tackler: did, bite: p.bite, extra: { cap: "So close to the line. The runner drives at the defence" } });
-    sb.go(750, (q) => {
-      formation(q, end, p.by, ai);
-      line(q, end, p.by, 3.5);
-      q[did] = { x: end + 0.8, y: p.by + 0.02 };
-      q[D((di + 1) % 4)] = { x: end + 1.4, y: p.by - 0.06 };
-      q[D((di + 2) % 4)] = { x: end + 1.2, y: p.by + 0.08 };
-    }, { k: "held", by: cid }, { hits: [{ kind: "tackle", runner: cid, other: did, result: "down", at: 0.3 }], banner: { text: "HELD UP!", color: AMBER, sub: surname(names.d[di]) }, cap: "Stopped short of the line. The defence holds firm" });
-    sb.go(800, () => {}, { k: "held", by: cid }, { cap: "The attack has to go again" });
+    // Three looks, picked from the event so a replay always matches: a double tackle, a drive stopped dead,
+    // or the ball held up under the defender's arms with the line in sight.
+    const look = Math.floor(r(41) * 3);
+    if (look === 0) {
+      sb.go(750, (q) => {
+        formation(q, end, p.by, ai);
+        line(q, end, p.by, 3.5);
+        q[did] = { x: end + 0.8, y: p.by + 0.02 };
+        q[D((di + 1) % 4)] = { x: end + 1.4, y: p.by - 0.06 };
+        q[D((di + 2) % 4)] = { x: end + 1.2, y: p.by + 0.08 };
+      }, { k: "held", by: cid }, { hits: [{ kind: "tackle", runner: cid, other: did, result: "down", at: 0.3 }], banner: { text: "HELD UP!", color: AMBER, sub: surname(names.d[di]) }, cap: "Stopped short of the line. The defence holds firm" });
+      sb.go(800, () => {}, { k: "held", by: cid }, { cap: "The attack has to go again" });
+    } else if (look === 1) {
+      sb.go(750, (q) => {
+        formation(q, end - 0.6, p.by, ai);
+        line(q, end - 0.6, p.by, 3.5);
+        q[did] = { x: end + 0.4, y: p.by };
+        q[D((di + 1) % 4)] = { x: end + 0.9, y: p.by + 0.05 };
+      }, { k: "held", by: cid }, { hits: [{ kind: "tackle", runner: cid, other: did, result: "driven", at: 0.3 }], banner: { text: "DRIVEN BACK!", color: AMBER, sub: surname(names.d[di]) }, cap: "Two defenders hit him together and stop him dead. The line is metres away" });
+      sb.go(800, (q) => {
+        q[did] = { x: end - 0.4, y: p.by };
+        q[cid] = { x: end - 1.2, y: p.by };
+      }, { k: "held", by: cid }, { cap: "He gets up quickly and the attack goes again" });
+    } else {
+      sb.go(650, (q) => {
+        formation(q, Math.min(end + 1.2, 99), p.by, ai);
+        line(q, Math.min(end + 1.2, 99), p.by, 3.5);
+        q[did] = { x: Math.min(end + 1.9, 99.4), y: p.by + 0.01 };
+      }, { k: "held", by: cid }, { hits: [{ kind: "tackle", runner: cid, other: did, result: "down", at: 0.3 }], cap: "He stretches for the line and the defender wraps him up" });
+      sb.go(900, () => {}, { k: "held", by: cid }, { banner: { text: "HELD UP OVER THE LINE!", color: AMBER, sub: surname(names.d[di]) }, cap: "The ball is held up and cannot be grounded. The defence scrambles clear" });
+    }
   } else if (type === "turnover" && ev.variant === "sixth") {
     // Six tackles with no score: the attack runs out of phases and hands the ball over.
     const p = setPlay(c, x0);

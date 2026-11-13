@@ -4,6 +4,21 @@ Versions follow `MAJOR.MINOR.PATCH`. The version lives in `package.json` and is 
 `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` (a test fails if they
 drift apart). It is shown in the app footer and on the new-game screen.
 
+## 0.7.0
+
+- Job offers: after two or more seasons, other clubs may approach you. Good results bring strong clubs, middling
+  ones mid-table clubs, and poor form only a rare lifeline from a bottom club. Taking a job moves you to that
+  club with its squad, a mandate and a new bank balance; your old club carries on under the computer. Turning
+  down strong offers makes the next approach a little less likely. Offers judge only your record at your
+  current club, and the club goal follows your last finish there. Save version 8.
+- New Training tab: pick the focus and see what each player has gained this season. Training no longer wastes
+  a slot on a player who cannot improve, and the choice of who trains is now an unbiased shuffle.
+- New highlights: carries held up on the line (with a few different looks), sixth-tackle turnovers deep in
+  the opposition half, and kicks that bounce into touch.
+- The Gamble team talk is now called All in.
+- Rivals: every pair of clubs keeps a head-to-head record, and after three meetings your closest history becomes
+  your rival. Games against them get a rivalry line at kick-off and full time, plus a line in the club news.
+
 ## 0.6.0 (stable alpha)
 
 - Matches are more draining (fatigue 0.65), so substitutions matter. Tiredness now carries between matches:

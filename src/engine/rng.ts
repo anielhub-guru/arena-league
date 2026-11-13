@@ -25,6 +25,15 @@ export class Rng {
   pick<T>(items: readonly T[]): T {
     return items[Math.floor(this.next() * items.length)];
   }
+  /** Unbiased Fisher-Yates shuffle. Returns a new array. */
+  shuffle<T>(items: readonly T[]): T[] {
+    const out = [...items];
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(this.next() * (i + 1));
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
+  }
   weighted<T>(items: readonly T[], weight: (item: T) => number): T {
     const total = items.reduce((sum, it) => sum + Math.max(0, weight(it)), 0);
     let roll = this.next() * total;

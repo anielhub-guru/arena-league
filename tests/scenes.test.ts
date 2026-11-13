@@ -51,6 +51,22 @@ describe("highlight scenes", () => {
       expect(v.min, k).toBeGreaterThan(1800); // a play right by the line is short
       expect(v.max, k).toBeLessThan(15000);
     }
-    for (const t of ["try:break", "try:power", "break:covered", "break:caught", "break:touch", "break:foul", "turnover", "intercept", "kick:live", "conversion:good", "conversion:post-in", "conversion-miss:post", "conversion-miss:wide", "conversion-miss:short", "penalty-goal:good"]) expect(seen.has(t), t).toBe(true);
+    for (const t of ["try:break", "try:power", "break:covered", "break:caught", "break:touch", "break:foul", "turnover", "carry:held", "turnover:sixth", "kick:touch", "intercept", "kick:live", "conversion:good", "conversion:post-in", "conversion-miss:post", "conversion-miss:wide", "conversion-miss:short", "penalty-goal:good"]) expect(seen.has(t), t).toBe(true);
+  }, 30000);
+
+  it("held-up carries are rare, and the scene has several looks", () => {
+    let held = 0, matches = 0;
+    const caps = new Set<string>();
+    for (let n = 0; n < 60; n++) {
+      const m = simulateMatch({ id: "h", season: 1, matchday: 1, home: teams[n % 8], away: teams[(n + 3) % 8], homeTactic: "attacking", awayTactic: "balanced", seed: hashSeed("held", n) });
+      matches++;
+      for (const e of m.events) {
+        if (e.type !== "carry" || e.variant !== "held") continue;
+        held++;
+        caps.add(buildScene(e)!.beats.map((b) => b.cap ?? "").join("|"));
+      }
+    }
+    expect(held / matches).toBeLessThan(4); // a moment, not a flood
+    expect(caps.size).toBeGreaterThanOrEqual(2);
   }, 30000);
 });
