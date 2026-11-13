@@ -413,3 +413,6 @@ h2.sub { margin-top: 14px; }
 
 .rival-badge { flex: none; margin: 0 6px; padding: 1px 6px; font-size: 11px; font-weight: bold; letter-spacing: 0.08em; color: #0e1412; background: #e0a43a; border-radius: 4px; }
 .rival-badge.heavy { background: #c4554d; color: #fff; }
+
+.goal-status { margin: 6px 0 2px; font-weight: bold; }
+.goal-status.ok { color: var(--acc); } .goal-status.warn { color: #e0a43a; } .goal-status.bad { color: #ff6b5e; }

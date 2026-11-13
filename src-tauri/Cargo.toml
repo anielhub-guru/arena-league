@@ -1,6 +1,6 @@
 [package]
 name = "dominion-league-manager"
-version = "0.8.0"
+version = "0.8.1"
 description = "Offline text-only 5v5 dominion league management game"
 edition = "2021"
 license = "GPL-3.0-or-later"

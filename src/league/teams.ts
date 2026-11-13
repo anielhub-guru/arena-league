@@ -159,24 +159,26 @@ export function overall(p: Player): number {
   return Math.round((p.power + p.pace + p.handling + p.tackling + p.kicking + p.stamina) / 6);
 }
 
-/** The club's internal goal, flavour only: first season: its strength rank among the league's clubs; later seasons: your last finish. */
-export function clubObjective(clubId: string, lastFinish?: number): string {
+/** The club's internal goal: its wording and the lowest league position that still meets it. */
+export function objectiveTarget(clubId: string, lastFinish?: number): { text: string; maxPos: number } {
+  const n = TEAM_DEFS.length;
   if (lastFinish) {
     // After the first season the goal follows your last finish: hold the title, chase the one above, or climb.
-    if (lastFinish <= 1) return "Defend the title";
-    if (lastFinish === 2) return "Win the league";
-    if (lastFinish >= TEAM_DEFS.length) return "Climb off the bottom";
-    return `Finish in the top ${lastFinish - 1}`;
+    if (lastFinish <= 1) return { text: "Defend the title", maxPos: 1 };
+    if (lastFinish === 2) return { text: "Win the league", maxPos: 1 };
+    if (lastFinish >= n) return { text: "Climb off the bottom", maxPos: n - 1 };
+    return { text: `Finish in the top ${lastFinish - 1}`, maxPos: lastFinish - 1 };
   }
   const order = TEAM_DEFS.map((d, i) => ({ id: d.id, strength: d.strength, i })).sort((a, b) => b.strength - a.strength || a.i - b.i);
   const rank = order.findIndex((d) => d.id === clubId);
-  if (rank < 0) return "";
-  const n = order.length;
-  if (rank < n / 4) return "Win the league";
-  if (rank < n / 2) return "Finish in the top half";
-  if (rank < (n * 3) / 4) return "Finish in the top six";
-  return "Avoid finishing bottom";
+  if (rank < 0) return { text: "", maxPos: n };
+  if (rank < n / 4) return { text: "Win the league", maxPos: 1 };
+  if (rank < n / 2) return { text: "Finish in the top half", maxPos: Math.ceil(n / 2) };
+  if (rank < (n * 3) / 4) return { text: "Finish in the top six", maxPos: 6 };
+  return { text: "Avoid finishing bottom", maxPos: n - 1 };
 }
+
+export const clubObjective = (clubId: string, lastFinish?: number): string => objectiveTarget(clubId, lastFinish).text;
 
 export function teamRating(t: Team): number {
   const starters = t.lineup.map((id) => t.players.find((p) => p.id === id)!);

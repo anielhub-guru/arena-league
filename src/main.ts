@@ -29,9 +29,9 @@ import {
   type OffseasonPlan,
   SQUAD_SIZE,
 } from "./league/season";
-import { heaviestDefeat, rivalOf } from "./league/rivals";
+import { RIVAL_MIN_MEETINGS, headToHead, heaviestDefeat, rivalOf } from "./league/rivals";
 import { computeStandings, teamForm } from "./league/standings";
-import { TEAM_DEFS, clubObjective, generateTeams, overall, potentialStars, teamColor, teamRating } from "./league/teams";
+import { TEAM_DEFS, clubObjective, objectiveTarget, generateTeams, overall, potentialStars, teamColor, teamRating } from "./league/teams";
 import * as store from "./storage";
 import { LiveMatch } from "./viewer/live";
 import { ATTR_NAMES, TACTIC_FOCUS, bestFive, buildRadar, playerProfile, profileOf } from "./viewer/radar";
@@ -636,6 +636,8 @@ function overviewView(s: SeasonState): HTMLElement {
     left.append(card(`Last result (matchday ${last.matchday})`, h("div", { class: "result" }, `${teamById(s, last.homeId).name}  ${r.homeScore} - ${r.awayScore}  ${teamById(s, last.awayId).name}`), ...(r.potm ? [h("div", { class: "potm-line" }, `★ Player of the match: ${r.potm.name} (${r.potm.club}), rating ${r.potm.rating.toFixed(1)}`)] : []), h("div", { class: "toolbar" }, btn)));
   }
 
+  if (!isSeasonOver(s) && !s.offers?.length && !s.intake) left.append(goalCard(s, table, pos));
+
   const newsItem = (n: SeasonState["news"][number]) => {
     const stamp = h("span", { class: "dim" }, n.matchday ? `S${n.season} MD${n.matchday}  ` : `S${n.season}  `);
     if (n.kind === "title") {
@@ -648,6 +650,47 @@ function overviewView(s: SeasonState): HTMLElement {
     card("League table", buildTable(s, { compact: true, onClub: (id) => (id === s.managedId ? undefined : scout(s, id)) })),
     card("Club news", h("ul", { class: "news" }, ...s.news.slice(0, 8).map(newsItem))));
   return h("div", { class: "grid" }, left, right);
+}
+
+/** Club goal progress and the state of the rivalry, for the overview. */
+function goalCard(s: SeasonState, table: ReturnType<typeof computeStandings>, pos: number): HTMLElement {
+  const goal = objectiveTarget(s.managedId, lastFinishHere(s));
+  const left = s.totalMatchdays - s.matchday + 1;
+  const row = table[pos - 1];
+  const parts: (HTMLElement | string)[] = [h("div", {}, h("b", {}, goal.text || "No set goal"), h("span", { class: "dim" }, `  (finish ${ordinal(goal.maxPos)} or better)`))];
+  if (goal.text) {
+    let status: string;
+    let cls = "ok";
+    if (pos <= goal.maxPos) {
+      const chaser = table[goal.maxPos];
+      const lead = chaser ? row.points - chaser.points : 0;
+      status = chaser ? `On track: ${ordinal(pos)}, ${lead} point${lead === 1 ? "" : "s"} clear of ${teamById(s, chaser.teamId).short} in ${ordinal(goal.maxPos + 1)}` : `On track: ${ordinal(pos)}`;
+      if (chaser && lead <= 2) cls = "warn";
+    } else {
+      const edge = table[goal.maxPos - 1];
+      const gap = edge.points - row.points;
+      status = `Behind: ${ordinal(pos)}, ${gap} point${gap === 1 ? "" : "s"} off ${teamById(s, edge.teamId).short} in ${ordinal(goal.maxPos)}`;
+      cls = "bad";
+    }
+    parts.push(h("div", { class: `goal-status ${cls}` }, status), h("div", { class: "dim" }, `${left} matchday${left === 1 ? "" : "s"} left`));
+  }
+
+  const rivalId = rivalOf(s.rivalry, s.managedId);
+  const heavy = heaviestDefeat(s.rivalry, s.managedId);
+  const lines: HTMLElement[] = [];
+  const next = (id: string) => s.fixtures.find((f) => !f.result && f.matchday >= s.matchday && ((f.homeId === s.managedId && f.awayId === id) || (f.awayId === s.managedId && f.homeId === id)));
+  if (rivalId) {
+    const hh = headToHead(s.rivalry, s.managedId, rivalId);
+    const run = hh.streak >= 2 ? (hh.streakBy === s.managedId ? `, you have won the last ${hh.streak}` : `, they have won the last ${hh.streak}`) : "";
+    const nf = next(rivalId);
+    lines.push(h("div", {}, h("span", { class: "rival-badge" }, "RIVAL"), h("b", {}, teamById(s, rivalId).name), h("div", { class: "dim" }, `W${hh.w} D${hh.d} L${hh.l}${run}. ${nf ? `Next meeting: matchday ${nf.matchday} (${nf.homeId === s.managedId ? "home" : "away"}).` : "No more meetings this season."}`)));
+  }
+  if (heavy && heavy.id !== rivalId) {
+    const nf = next(heavy.id);
+    lines.push(h("div", {}, h("span", { class: "rival-badge heavy" }, `LOST BY ${heavy.by}`), h("b", {}, teamById(s, heavy.id).name), h("div", { class: "dim" }, nf ? `A chance to put it right on matchday ${nf.matchday}.` : "Your heaviest defeat. No more meetings this season.")));
+  }
+  if (!lines.length) lines.push(h("div", { class: "dim" }, `No rival yet. One emerges after ${RIVAL_MIN_MEETINGS} meetings with the same club.`));
+  return card("Season goal and rivalry", ...parts, h("h2", { class: "sub" }, "Rivalry"), ...lines);
 }
 
 function squadView(s: SeasonState): HTMLElement {

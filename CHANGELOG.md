@@ -4,6 +4,13 @@ Versions follow `MAJOR.MINOR.PATCH`. The version lives in `package.json` and is 
 `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` (a test fails if they
 drift apart). It is shown in the app footer and on the new-game screen.
 
+## 0.8.1
+
+- The overview now has a Season goal and rivalry card under the last result. It shows your club goal with the
+  position it needs, whether you are on track or behind and by how many points, and the matchdays left. Below
+  it sit your rival (record, streak and next meeting) and the club that gave you your heaviest defeat.
+- Club news moved under the league table on the overview.
+
 ## 0.8.0
 
 - New History tab (key 6). Champions by year: champions, runners-up, the league's top scorer, your own finish
