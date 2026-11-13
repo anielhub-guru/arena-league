@@ -23,13 +23,13 @@ header nav button.active { background: transparent; color: #fff; }
 header nav button.active::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px; background: var(--acc); box-shadow: 0 0 8px #8fe3a6aa; }
 header nav kbd { font: inherit; font-size: 10px; color: var(--dim); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; line-height: 15px; }
 header nav button.active kbd { color: var(--acc); border-color: var(--acc); }
-.hclub { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.hclub { display: flex; align-items: center; gap: 9px; flex: 0 1 auto; min-width: 0; }
 .crest { flex: none; width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center; font-weight: bold; font-size: 13px; color: #0e1412; background: linear-gradient(135deg, var(--acc), #4fae6c); }
 .hclub .who { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
 .hclub .who b { color: #fff; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hclub .who span { color: var(--dim); font-size: 11px; white-space: nowrap; }
-.money { flex: none; color: var(--acc); font-weight: bold; background: #0b100e; border: 1px solid var(--line); border-radius: 999px; padding: 3px 11px; font-size: 12px; }
-.hactions { display: flex; align-items: center; gap: 6px; padding-left: 16px; border-left: 1px solid var(--line); }
+.hclub .who span { color: var(--dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.money { flex: none; white-space: nowrap; color: var(--acc); font-weight: bold; background: #0b100e; border: 1px solid var(--line); border-radius: 999px; padding: 3px 11px; font-size: 12px; }
+.hactions { flex: none; display: flex; align-items: center; gap: 6px; padding-left: 16px; border-left: 1px solid var(--line); }
 .hactions button { white-space: nowrap; border-radius: 4px; padding: 6px 12px; }
 .hactions .ghost { background: transparent; border-color: transparent; color: var(--dim); padding: 6px 9px; }
 .hactions .ghost:hover:not(:disabled) { background: #1a2b21; color: var(--text); }
@@ -42,9 +42,9 @@ header nav button.active kbd { color: var(--acc); border-color: var(--acc); }
 .more .menu { position: absolute; right: 0; top: 34px; z-index: 20; min-width: 140px; display: flex; flex-direction: column; gap: 2px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; box-shadow: 0 10px 30px #000a; }
 .more .menu button { text-align: left; background: transparent; border-color: transparent; }
 .more .menu button:hover:not(:disabled) { background: #20372a; }
-@media (max-width: 1100px) { .hclub .who span, header nav kbd { display: none; } }
-@media (max-width: 900px) { .hclub .who { display: none; } .hactions .ghost { display: none; } .more { display: block; } header { gap: 12px; } }
-@media (max-width: 760px) { .brand span { display: none; } }
+@media (max-width: 1340px) { .hactions .ghost { display: none; } .more { display: block; } }
+@media (max-width: 1180px) { .brand span, .hclub .who span, header nav kbd { display: none; } header { gap: 14px; } }
+@media (max-width: 900px) { .hclub .who { display: none; } header nav button { padding: 0 9px; } }
 nav { display: flex; gap: 4px; }
 main { flex: 1; overflow: auto; min-height: 0; padding-right: 4px; }
 footer { color: var(--dim); font-size: 11px; border-top: 1px solid var(--line); padding-top: 6px; }
