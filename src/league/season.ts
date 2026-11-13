@@ -57,6 +57,10 @@ export interface NewsItem {
   season: number;
   matchday: number;
   text: string;
+  /** Special presentation: "title" = you won the league, "finish" = end-of-season position. */
+  kind?: "title" | "finish";
+  /** Final league position, for kind "finish"/"title". */
+  position?: number;
 }
 
 /** Career totals include a count of seasons played. */
@@ -233,7 +237,9 @@ export function playMatchday(prev: SeasonState, managedLog?: MatchLog): { state:
   applyLoad(state, logs);
   for (const club of state.teams) if (club.id !== state.managedId) aiRest(club);
   news.push(...train(state, md));
-  state.news = [...news.map((text) => ({ season: state.season, matchday: md, text })), ...state.news].slice(0, 14);
+  const items: NewsItem[] = news.map((text) => ({ season: state.season, matchday: md, text }));
+  if (md === state.totalMatchdays) items.unshift(finalPositionNews(state, ids, md));
+  state.news = [...items, ...state.news].slice(0, 14);
   state.matchday++;
   return { state, logs };
 }
@@ -366,6 +372,21 @@ function recordPlayers(state: SeasonState, logs: MatchLog[]): string[] {
     news.push(`${cur.name} is suspended, so ${rep.name} comes into the starting five at ${ROLES[i]}.`);
   }
   return news;
+}
+
+/** End-of-season announcement: where the manager's club finished, with a special item for winning the league. */
+function finalPositionNews(state: SeasonState, ids: string[], md: number): NewsItem {
+  const table = standingsAt(ids, state.fixtures, state.totalMatchdays);
+  const pos = table.findIndex((r) => r.teamId === state.managedId) + 1;
+  const row = table[pos - 1];
+  const club = teamById(state, state.managedId).name;
+  const base = { season: state.season, matchday: md, position: pos };
+  if (pos === 1) {
+    return { ...base, kind: "title", text: `CHAMPIONS! ${club} win the Season ${state.season} league title with ${row.points} points.` };
+  }
+  const champ = teamById(state, table[0].teamId).name;
+  const tail = pos <= 3 ? " A podium finish." : "";
+  return { ...base, kind: "finish", text: `Full time on Season ${state.season}: ${club} finish ${ord(pos)} of ${table.length} on ${row.points} points. ${champ} are champions.${tail}` };
 }
 
 function ord(n: number): string {

@@ -531,7 +531,15 @@ function overviewView(s: SeasonState): HTMLElement {
     left.append(card(`Last result (matchday ${last.matchday})`, h("div", { class: "result" }, `${teamById(s, last.homeId).name}  ${r.homeScore} - ${r.awayScore}  ${teamById(s, last.awayId).name}`), ...(r.potm ? [h("div", { class: "potm-line" }, `★ Player of the match: ${r.potm.name} (${r.potm.club}), rating ${r.potm.rating.toFixed(1)}`)] : []), h("div", { class: "toolbar" }, btn)));
   }
 
-  left.append(card("Club news", h("ul", { class: "news" }, ...s.news.slice(0, 8).map((n) => h("li", {}, h("span", { class: "dim" }, n.matchday ? `S${n.season} MD${n.matchday}  ` : `S${n.season}  `), n.text)))));
+  const newsItem = (n: SeasonState["news"][number]) => {
+    const stamp = h("span", { class: "dim" }, n.matchday ? `S${n.season} MD${n.matchday}  ` : `S${n.season}  `);
+    if (n.kind === "title") {
+      return h("li", { class: "news-title" }, h("div", { class: "trophy" }, "🏆"), h("div", { class: "nt-body" }, h("div", { class: "nt-kicker" }, `SEASON ${n.season} · LEAGUE CHAMPIONS`), h("div", { class: "nt-text" }, n.text)));
+    }
+    if (n.kind === "finish") return h("li", { class: "news-finish" }, h("span", { class: "pos-badge" }, `${n.position}`), h("div", {}, stamp, n.text));
+    return h("li", {}, stamp, n.text);
+  };
+  left.append(card("Club news", h("ul", { class: "news" }, ...s.news.slice(0, 8).map(newsItem))));
 
   const right = h("div", { class: "col" }, card("League table", buildTable(s, { compact: true, onClub: (id) => (id === s.managedId ? undefined : scout(s, id)) })));
   return h("div", { class: "grid" }, left, right);
@@ -753,7 +761,9 @@ function render() {
   newBtn.onclick = newGameFlow;
   const helpBtn = h("button", {}, "How to play");
   helpBtn.onclick = showRules;
-  app.append(h("header", {}, h("h1", {}, "ARENA LEAGUE"), nav, h("span", { class: "spacer" }), h("span", { class: "dim" }, `${teamById(s, s.managedId).name} | ${s.gender === "women" ? "Women's" : "Men's"} League | Season ${s.season} | ${fmtMoney(s.money)}`), watch, quick, helpBtn, newBtn));
+  const club = teamById(s, s.managedId);
+  const meta = h("div", { class: "hmeta" }, h("b", {}, club.name), h("span", { class: "dim" }, `${s.gender === "women" ? "Women's" : "Men's"} League · Season ${s.season}`), h("span", { class: "money" }, fmtMoney(s.money)));
+  app.append(h("header", {}, h("h1", {}, "ARENA", h("br"), "LEAGUE"), nav, h("span", { class: "spacer" }), meta, h("div", { class: "hactions" }, watch, quick, helpBtn, newBtn)));
 
   const body = h("main");
   if (tab === "overview") body.append(overviewView(s));
