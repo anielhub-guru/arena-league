@@ -7,7 +7,7 @@
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6">
   <img alt="Rust" src="https://img.shields.io/badge/Rust-stable-orange">
   <img alt="Offline" src="https://img.shields.io/badge/network-none-green">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.7.0-blue">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.8.0-blue">
   <img alt="License GPL v3" src="https://img.shields.io/badge/license-GPLv3-blue">
   <img alt="Tests" src="https://img.shields.io/badge/tests-vitest%20%2B%20cargo-brightgreen">
 </p>

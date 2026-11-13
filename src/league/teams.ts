@@ -32,6 +32,9 @@ const FIRST_MEN = ["Emeka", "Tunde", "Chidi", "Ibrahim", "Segun", "Kelechi", "Ob
 const FIRST_WOMEN = ["Ngozi", "Amaka", "Funmi", "Aisha", "Chioma", "Blessing", "Folake", "Zainab", "Adaeze", "Temitope", "Ifeoma", "Hauwa", "Yetunde", "Nkechi", "Bukola", "Fatima", "Chiamaka", "Omolara", "Halima", "Titilayo", "Ebere", "Sade", "Kehinde", "Amina"];
 const LAST = ["Okafor", "Adeyemi", "Balogun", "Eze", "Abubakar", "Okonkwo", "Ogunleye", "Nwosu", "Lawal", "Obi", "Adebisi", "Ibrahim", "Chukwu", "Olawale", "Danjuma", "Uzoma", "Afolabi", "Musa", "Nwachukwu", "Bankole", "Ajayi", "Onyeka", "Salisu", "Oyelaran"];
 
+/** A generated Nigerian name for the league's gender. */
+export const randomName = (rng: Rng, gender: Gender) => `${rng.pick(gender === "women" ? FIRST_WOMEN : FIRST_MEN)} ${rng.pick(LAST)}`;
+
 /** Squad of ten: the first five are the default starters, then three on the bench, then two reserves. */
 const SQUAD_ROLES: Role[] = [...ROLES, "Bruiser", "Winger", "Pivot", "Sweeper", "Winger"];
 export const RESERVE_COUNT = 2;

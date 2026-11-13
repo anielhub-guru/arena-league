@@ -168,7 +168,7 @@ export interface MatchInput {
   /** True when the game also makes this club's substitutions (AI clubs). Off for the manager and in plain tests. */
   homeAiSubs?: boolean;
   awayAiSubs?: boolean;
-  /** Set when the managed club is playing its rival. Only changes the wording. */
+  /** Set when the managed club is playing its rival or the club that holds its heaviest defeat. Only changes the wording. */
   rival?: RivalNotes;
   seed: number;
 }
@@ -525,7 +525,8 @@ export class MatchSim {
       this.x0 = absX(this.att, this.pos);
       const rv = this.input.rival;
       const mine = rv ? (rv.managedIsHome ? h.score - a.score : a.score - h.score) : 0;
-      const tail = rv ? ` ${mine > 0 ? rv.fulltime.win : mine < 0 ? rv.fulltime.loss : rv.fulltime.draw}.` : "";
+      const close = rv ? (mine > 0 ? rv.fulltime.win : mine < 0 ? rv.fulltime.loss : rv.fulltime.draw) : "";
+      const tail = close ? ` ${close}.` : "";
       this.emit("fulltime", `FULL TIME. ${home.name} ${h.score} - ${a.score} ${away.name}. ${verdict}.${tail}`, true);
       this.finished = true;
       return;

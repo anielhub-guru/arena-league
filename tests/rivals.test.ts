@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { headToHead, recordMeeting, rivalOf, type Rivalry } from "../src/league/rivals";
+import { heaviestDefeat, headToHead, recordMeeting, rivalOf, type Rivalry } from "../src/league/rivals";
 import { autoPlan, buildSim, completeOffseason, isSeasonOver, newGame, playMatchday, startNextSeason, type SeasonState } from "../src/league/season";
 
 describe("rivalry records", () => {
@@ -44,5 +44,24 @@ describe("rivals in play", () => {
     expect(withRival.events[0].text).toContain("rivalry game");
     expect(without.events[0].text).not.toContain("rivalry");
     expect(withRival.events.at(-1)!.text).toMatch(/Bragging rights|rivals|Nothing settled/);
+  });
+});
+
+describe("widest defeat", () => {
+  it("is its own thing, separate from the rival", () => {
+    const r: Rivalry = {};
+    recordMeeting(r, "me", "x", 20, 18);
+    recordMeeting(r, "x", "me", 9, 10);
+    recordMeeting(r, "me", "x", 9, 8);
+    recordMeeting(r, "y", "me", 40, 5);
+    expect(rivalOf(r, "me")).toBe("x");
+    expect(heaviestDefeat(r, "me")).toEqual({ id: "y", by: 35 });
+    recordMeeting(r, "me", "z", 5, 25);
+    expect(heaviestDefeat(r, "me")).toEqual({ id: "y", by: 35 });
+  });
+  it("ignores narrow defeats", () => {
+    const r: Rivalry = {};
+    recordMeeting(r, "y", "me", 12, 5);
+    expect(heaviestDefeat(r, "me")).toBeUndefined();
   });
 });

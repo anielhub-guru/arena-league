@@ -409,3 +409,7 @@ td.club.link { cursor: pointer; text-decoration: underline dotted var(--dim); te
 .offer.lifeline .of-kicker { color: var(--dim); }
 .offer.lifeline .of-club { font-size: 18px; }
 @media (prefers-reduced-motion: reduce) { .offer.elite { animation: none; } }
+h2.sub { margin-top: 14px; }
+
+.rival-badge { flex: none; margin: 0 6px; padding: 1px 6px; font-size: 11px; font-weight: bold; letter-spacing: 0.08em; color: #0e1412; background: #e0a43a; border-radius: 4px; }
+.rival-badge.heavy { background: #c4554d; color: #fff; }

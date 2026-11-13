@@ -2,7 +2,8 @@
  * Rivalries. Every pair of clubs keeps a short record of how they have got on, and the
  * club you manage gets one rival: the opponent with the most history behind it. Games
  * are heated by how often you have met and how close they have been, and by a run of
- * wins for one side. Records carry across seasons, and across jobs.
+ * wins for one side. The club that has beaten you by the widest score can also be your rival,
+ * even before you have met three times. Records carry across seasons, and across jobs.
  */
 export interface PairRecord {
   /** Wins for the club whose id sorts first, wins for the other, and draws. */
@@ -10,6 +11,8 @@ export interface PairRecord {
   d: number;
   /** Games decided by one try or less. */
   close: number;
+  /** Widest winning margin, in points, for the club whose id sorts first and for the other. Missing on older saves. */
+  big?: [number, number];
   /** Club that won the latest game, or "draw". */
   last?: string;
   /** Consecutive wins by `last`. Zero after a draw. */
@@ -22,6 +25,8 @@ export type Rivalry = Record<string, PairRecord>;
 export const RIVAL_MIN_MEETINGS = 3;
 /** Margin, in points, at or under which a game counts as close. */
 const CLOSE_MARGIN = 7;
+/** A defeat by at least this many points counts as a heavy one. */
+export const HEAVY_LOSS = 14;
 
 export const pairKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 const meetings = (r: PairRecord) => r.w[0] + r.w[1] + r.d;
@@ -32,7 +37,12 @@ export function recordMeeting(rivalry: Rivalry, homeId: string, awayId: string, 
   const r = (rivalry[key] ??= { w: [0, 0], d: 0, close: 0, streak: 0 });
   const winner = homeScore === awayScore ? undefined : homeScore > awayScore ? homeId : awayId;
   if (!winner) r.d++;
-  else r.w[winner === key.split("|")[0] ? 0 : 1]++;
+  else {
+    const side = winner === key.split("|")[0] ? 0 : 1;
+    r.w[side]++;
+    r.big ??= [0, 0];
+    r.big[side] = Math.max(r.big[side], Math.abs(homeScore - awayScore));
+  }
   if (Math.abs(homeScore - awayScore) <= CLOSE_MARGIN) r.close++;
   const now = winner ?? "draw";
   r.streak = winner && r.last === winner ? r.streak + 1 : winner ? 1 : 0;
@@ -41,7 +51,14 @@ export function recordMeeting(rivalry: Rivalry, homeId: string, awayId: string, 
 
 const heat = (r: PairRecord) => meetings(r) + 2 * r.close + (r.streak >= 3 ? 2 : 0);
 
-/** The club's rival, if the history is deep enough. Ties go to the earlier id so it never flickers. */
+/** Widest margin by which `otherId` has beaten `clubId`, or 0. */
+export function widestLoss(rivalry: Rivalry | undefined, clubId: string, otherId: string): number {
+  const r = rivalry?.[pairKey(clubId, otherId)];
+  if (!r?.big) return 0;
+  return r.big[pairKey(clubId, otherId).split("|")[0] === otherId ? 0 : 1];
+}
+
+/** The club's rival: the opponent with the deepest history. Ties go to the earlier id so it never flickers. */
 export function rivalOf(rivalry: Rivalry | undefined, clubId: string): string | undefined {
   let best: { id: string; h: number } | undefined;
   for (const [key, r] of Object.entries(rivalry ?? {})) {
@@ -53,6 +70,19 @@ export function rivalOf(rivalry: Rivalry | undefined, clubId: string): string | 
     if (!best || h > best.h || (h === best.h && id < best.id)) best = { id, h };
   }
   return best?.id;
+}
+
+/** The club that has beaten `clubId` by the widest score, if that was a heavy defeat. Separate from the rival. */
+export function heaviestDefeat(rivalry: Rivalry | undefined, clubId: string): { id: string; by: number } | undefined {
+  let worst: { id: string; by: number } | undefined;
+  for (const key of Object.keys(rivalry ?? {})) {
+    const [a, b] = key.split("|");
+    if (a !== clubId && b !== clubId) continue;
+    const id = a === clubId ? b : a;
+    const by = widestLoss(rivalry, clubId, id);
+    if (by >= HEAVY_LOSS && (!worst || by > worst.by || (by === worst.by && id < worst.id))) worst = { id, by };
+  }
+  return worst;
 }
 
 /** Wins, draws and losses from `clubId`'s point of view against `otherId`. */
@@ -97,4 +127,18 @@ export function rivalNotes(rivalry: Rivalry | undefined, managedId: string, riva
     },
     managedIsHome,
   };
+}
+
+/** Commentary for the club that gave you your heaviest defeat. */
+export function heavyNotes(by: number, managedIsHome: boolean): RivalNotes {
+  return {
+    kickoff: `These are the side that beat you by ${plural(by, "point")}, your heaviest defeat. A chance to put that right.`,
+    fulltime: { win: "That goes some way to making up for the heavy defeat", draw: "", loss: "" },
+    managedIsHome,
+  };
+}
+
+/** Both notes for a game that is a rivalry and also against the heavy-defeat club. The rival's closing line wins. */
+export function mergeNotes(a: RivalNotes, b: RivalNotes): RivalNotes {
+  return { kickoff: `${a.kickoff} ${b.kickoff}`, fulltime: a.fulltime, managedIsHome: a.managedIsHome };
 }

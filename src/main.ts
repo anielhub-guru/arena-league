@@ -29,6 +29,7 @@ import {
   type OffseasonPlan,
   SQUAD_SIZE,
 } from "./league/season";
+import { heaviestDefeat, rivalOf } from "./league/rivals";
 import { computeStandings, teamForm } from "./league/standings";
 import { TEAM_DEFS, clubObjective, generateTeams, overall, potentialStars, teamColor, teamRating } from "./league/teams";
 import * as store from "./storage";
@@ -36,18 +37,22 @@ import { LiveMatch } from "./viewer/live";
 import { ATTR_NAMES, TACTIC_FOCUS, bestFive, buildRadar, playerProfile, profileOf } from "./viewer/radar";
 import { buildRules } from "./viewer/rules";
 import { buildTable } from "./viewer/table";
+import { championsCard, clubCard } from "./viewer/history";
 
-type Tab = "overview" | "squad" | "training" | "table" | "fixtures";
+type Tab = "overview" | "squad" | "training" | "table" | "fixtures" | "history";
 const TABS: [Tab, string][] = [
   ["overview", "1 Overview"],
   ["squad", "2 Squad"],
   ["training", "3 Training"],
   ["table", "4 Table"],
   ["fixtures", "5 Fixtures"],
+  ["history", "6 History"],
 ];
 
 let state: SeasonState | null = null;
 let tab: Tab = "overview";
+/** History tab: whose records to show. Defaults to your club. */
+let historyClub: string | null = null;
 let busy = false;
 let live: LiveMatch | null = null;
 let selectedPlayer: string | null = null;
@@ -781,6 +786,8 @@ function trainingView(s: SeasonState): HTMLElement {
 
 function fixturesView(s: SeasonState): HTMLElement {
   const wrap = h("div", { class: "col" });
+  const rival = rivalOf(s.rivalry, s.managedId);
+  const heavy = heaviestDefeat(s.rivalry, s.managedId);
   for (let md = 1; md <= s.totalMatchdays; md++) {
     const box = h("section", { class: `card ${md === s.matchday ? "current" : ""}` }, h("h2", {}, `Matchday ${md}`));
     for (const f of s.fixtures.filter((x) => x.matchday === md)) {
@@ -789,6 +796,13 @@ function fixturesView(s: SeasonState): HTMLElement {
         h("span", { class: "h" }, teamById(s, f.homeId).name),
         h("span", { class: "sc" }, f.result ? `${f.result.homeScore} - ${f.result.awayScore}` : "v"),
         h("span", { class: "a" }, teamById(s, f.awayId).name));
+      if (mine) {
+        const oppId = f.homeId === s.managedId ? f.awayId : f.homeId;
+        const tags: HTMLElement[] = [];
+        if (oppId === rival) tags.push(h("span", { class: "rival-badge", title: "Your rival: the club you have the most history with" }, "RIVAL"));
+        if (heavy && oppId === heavy.id) tags.push(h("span", { class: "rival-badge heavy", title: `This club beat you by ${heavy.by} points, your heaviest defeat` }, `LOST BY ${heavy.by}`));
+        row.children[f.homeId === s.managedId ? 2 : 0].append(...tags);
+      }
       if (f.result) {
         const b = h("button", {}, "Replay");
         b.onclick = () => replayMatch(f.id);
@@ -913,6 +927,7 @@ function render() {
   else if (tab === "squad") body.append(squadView(s));
   else if (tab === "training") body.append(trainingView(s));
   else if (tab === "table") body.append(card("League table", buildTable(s, { onClub: (id) => (id === s.managedId ? undefined : scout(s, id)) }), h("div", { class: "hint" }, "▲▼ = places moved since the previous matchday. Win 4, draw 2, +1 for 3+ tries (TF), +1 for losing by 7 or fewer (BP). Click a club to scout it.")));
+  else if (tab === "history") body.append(h("div", { class: "col" }, championsCard(s), clubCard(s, historyClub && s.records[historyClub] ? historyClub : s.managedId, (id) => { historyClub = id; render(); })));
   else body.append(fixturesView(s));
   app.append(body);
   if (error) app.append(h("div", { class: "err" }, error));

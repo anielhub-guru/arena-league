@@ -4,6 +4,18 @@ Versions follow `MAJOR.MINOR.PATCH`. The version lives in `package.json` and is 
 `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` (a test fails if they
 drift apart). It is shown in the app footer and on the new-game screen.
 
+## 0.8.0
+
+- New History tab (key 6). Champions by year: champions, runners-up, the league's top scorer, your own finish
+  and a title count per club.
+- Club records, kept per club: biggest win, most points and tries in a match, most league points in a season,
+  and the best player performances in a match and in a season. Each club starts with generated founding
+  records that follow the club's strength (strong clubs start higher), and they fall as seasons are played.
+  Breaking one of your club's records appears in the club news. Pick any club to see its records.
+- Retired legends: a player who retires after three or more seasons is remembered by the club they retired
+  from (best eight kept per club), with their career line. No hall of fame. Save version 9; older saves get
+  founding records and start recording legends from the next retirement.
+
 ## 0.7.0
 
 - Job offers: after two or more seasons, other clubs may approach you. Good results bring strong clubs, middling
@@ -17,7 +29,8 @@ drift apart). It is shown in the app footer and on the new-game screen.
   the opposition half, and kicks that bounce into touch.
 - The Gamble team talk is now called All in.
 - Rivals: every pair of clubs keeps a head-to-head record, and after three meetings your closest history becomes
-  your rival. Games against them get a rivalry line at kick-off and full time, plus a line in the club news.
+  your rival. Games against them get a rivalry line at kick-off and full time, plus a line in the club news. Fixtures show a RIVAL tag, and a separate LOST BY tag marks the club that beat you
+  by the widest score (14 points or more), with its own kick-off line.
 
 ## 0.6.0 (stable alpha)
 

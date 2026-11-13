@@ -3,14 +3,15 @@ import { MatchSim, RED_BAN, SHAPE_BY_STYLE, attackFit, slotPlayer } from "../eng
 import { STAT_KEYS, emptyTotals, ROLES, type Attr, type Gender, type MatchLog, type Player, type PlayerTotals, type Role, type ShapeId, type TacticId, type Team } from "../engine/types";
 import { describeLine, impact, playerOfTheMatch } from "./awards";
 import { buildSchedule, type Fixture } from "./schedule";
-import { recordMeeting, rivalNotes, rivalOf, type Rivalry } from "./rivals";
+import { heavyNotes, heaviestDefeat, mergeNotes, recordMeeting, rivalNotes, rivalOf, type Rivalry } from "./rivals";
 import { computeStandings, standingsAt } from "./standings";
+import { defaultLeagueRecords, recordMatch, recordRetirement, recordSeasonEnd, type Legend, type LeagueRecords } from "./history";
 import { MATCH_PAY, MAX_BUYS, MONEY_START, fmtMoney, playerValue, prizeFor, sellPrice, teenSalePrice, wageOf } from "./economy";
 import { RESERVE_COUNT, evolvePlayers, generateTeams, makeReserves, initialPotential, makeProspects, overall, teamRating } from "./teams";
 
 export { describeLine, impact };
 
-export const SAVE_VERSION = 8;
+export const SAVE_VERSION = 9;
 /** Five starters, three bench, two reserves. */
 export const SQUAD_SIZE = 10;
 
@@ -54,6 +55,11 @@ export interface SeasonRecord {
   managedPosition: number;
   /** The club you managed that season. Missing on older saves. */
   clubId?: string;
+  /** Who finished second. Missing on older saves. */
+  runnerUpId?: string;
+  championPoints?: number;
+  /** The league's top points scorer that season. Missing on older saves. */
+  topScorer?: { name: string; clubId: string; points: number };
 }
 
 /** How the approach is presented, set by your recent results rather than by the club. */
@@ -121,6 +127,10 @@ export interface SeasonState {
   lastOfferSeason?: number;
   /** Strong offers you have turned down since you last moved. Each makes the next approach a little less likely. */
   declinedTop?: number;
+  /** Each club's records, by club id. Start from generated founding records and are broken as you play. */
+  records: LeagueRecords;
+  /** Long-serving players who have retired, by the club they retired from. */
+  legends: Record<string, Legend[]>;
 }
 
 /** Upgrades a saved season from an older version, or returns null if it cannot be upgraded. */
@@ -144,6 +154,7 @@ export function migrateSave(raw: SeasonState): SeasonState | null {
     s.version = 7;
   }
   if (s.version === 7) s = { ...s, version: 8 };
+  if (s.version === 8) s = { ...s, version: 9, records: defaultLeagueRecords(s.seed, s.gender), legends: {} };
   if (s.version !== SAVE_VERSION) return null;
   return { ...s, shape: s.shape ?? "sweeper" };
 }
@@ -171,6 +182,8 @@ export function newGame(seed: number, managedId: string, gender: Gender = "men")
     seasonStats: {},
     careerStats: {},
     money: MONEY_START,
+    records: defaultLeagueRecords(seed, gender),
+    legends: {},
   };
 }
 
@@ -201,7 +214,14 @@ export function buildSim(s: SeasonState, f: Fixture, live = false): MatchSim {
   const home = teamById(s, f.homeId);
   const away = teamById(s, f.awayId);
   const rival = rivalOf(s.rivalry, s.managedId);
-  const involved = (home.id === s.managedId && away.id === rival) || (away.id === s.managedId && home.id === rival);
+  const heavy = heaviestDefeat(s.rivalry, s.managedId);
+  const opp = home.id === s.managedId ? away.id : away.id === s.managedId ? home.id : undefined;
+  const managedIsHome = home.id === s.managedId;
+  let notes = opp && opp === rival ? rivalNotes(s.rivalry, s.managedId, rival, teamById(s, rival).name, managedIsHome) : undefined;
+  if (opp && heavy && opp === heavy.id) {
+    const h = heavyNotes(heavy.by, managedIsHome);
+    notes = notes ? mergeNotes(notes, h) : h;
+  }
   return new MatchSim({
     id: f.id,
     season: s.season,
@@ -217,7 +237,7 @@ export function buildSim(s: SeasonState, f: Fixture, live = false): MatchSim {
     awayAiSubs: away.id !== s.managedId,
     homeAuto: !(live && home.id === s.managedId),
     awayAuto: !(live && away.id === s.managedId),
-    ...(involved ? { rival: rivalNotes(s.rivalry, s.managedId, rival!, teamById(s, rival!).name, home.id === s.managedId) } : {}),
+    ...(notes ? { rival: notes } : {}),
     seed: hashSeed(s.seed, s.season, f.id),
   });
 }
@@ -250,6 +270,7 @@ export function playMatchday(prev: SeasonState, managedLog?: MatchLog): { state:
   const md = state.matchday;
   // Which club was your rival going into this round, so the news matches what the commentary said.
   const rivalBefore = rivalOf(state.rivalry, state.managedId);
+  const heavyBefore = heaviestDefeat(state.rivalry, state.managedId);
   state.rivalry ??= {};
   for (const l of logs) recordMeeting(state.rivalry, l.homeId, l.awayId, l.homeScore, l.awayScore);
   const news: string[] = [];
@@ -269,9 +290,15 @@ export function playMatchday(prev: SeasonState, managedLog?: MatchLog): { state:
     if (now === 1 && was !== 1) news.push("You have gone top of the table.");
     const oppId = home ? mine.awayId : mine.homeId;
     if (rivalBefore === oppId) news.push(pf > pa ? `Bragging rights: you beat your rivals ${opp}.` : pf < pa ? `Your rivals ${opp} get the better of you.` : `Honours even with your rivals ${opp}.`);
-    else if (!rivalBefore && rivalOf(state.rivalry, state.managedId) === oppId) news.push(`${opp} have become your rivals.`);
+    if (heavyBefore?.id === oppId && pf > pa) news.push(`Revenge: you beat ${opp}, who had handed you your heaviest defeat.`);
+    if (rivalBefore !== oppId && !rivalBefore && rivalOf(state.rivalry, state.managedId) === oppId) news.push(`${opp} have become your rivals.`);
   }
   news.push(...recordPlayers(state, logs));
+  for (const log of logs) for (const b of recordMatch(state.records, log)) if (b.clubId === state.managedId) news.push(b.text);
+  if (md === state.totalMatchdays) {
+    const table = standingsAt(ids, state.fixtures, state.totalMatchdays);
+    for (const b of recordSeasonEnd(state.records, state.season, table, state.teams, state.seasonStats)) if (b.clubId === state.managedId) news.push(b.text);
+  }
   applyLoad(state, logs);
   for (const club of state.teams) if (club.id !== state.managedId) aiRest(club);
   news.push(...train(state, md));
@@ -467,13 +494,28 @@ function train(state: SeasonState, md: number): string[] {
 /** Weekly chance that an AI club's training lifts one player by a point (the manager's club gets up to three at 80%). */
 const AI_TRAIN_CHANCE = 0.5;
 
+/** The finished season as a history entry: champions, runners-up and the league's top scorer. */
+export function seasonRecordFor(state: SeasonState): SeasonRecord {
+  const ids = state.teams.map((t) => t.id);
+  const table = standingsAt(ids, state.fixtures, state.totalMatchdays);
+  const finish = table.findIndex((r) => r.teamId === state.managedId) + 1;
+  let topScorer: SeasonRecord["topScorer"];
+  for (const club of state.teams) {
+    for (const p of club.players) {
+      const pts = state.seasonStats[p.id]?.points ?? 0;
+      if (pts > (topScorer?.points ?? 0)) topScorer = { name: p.name, clubId: club.id, points: pts };
+    }
+  }
+  return { season: state.season, championId: table[0].teamId, managedPosition: finish, clubId: state.managedId, runnerUpId: table[1]?.teamId, championPoints: table[0].points, ...(topScorer ? { topScorer } : {}) };
+}
+
 export function startNextSeason(prev: SeasonState): SeasonState {
   if (!isSeasonOver(prev)) throw new Error("Season is not over");
   const state = structuredClone(prev);
   const ids = state.teams.map((t) => t.id);
   const table = standingsAt(ids, state.fixtures, state.totalMatchdays);
   const finish = table.findIndex((r) => r.teamId === state.managedId) + 1;
-  state.history.push({ season: state.season, championId: table[0].teamId, managedPosition: finish, clubId: state.managedId });
+  state.history.push(seasonRecordFor(state));
   for (const [id, now] of Object.entries(state.seasonStats)) {
     const career = (state.careerStats[id] ??= { ...emptyTotals(), seasons: 0 });
     for (const k of STAT_KEYS) career[k] += now[k];
@@ -483,6 +525,7 @@ export function startNextSeason(prev: SeasonState): SeasonState {
   state.trainGains = {};
   for (const t of state.teams) for (const p of t.players) delete p.tired;
   const news: string[] = [];
+  const lastSeason = state.season;
   // Season finances: prize money for the finishing position, less the wage bill.
   const prize = prizeFor(finish);
   const wages = teamById(state, state.managedId).players.reduce((t, p) => t + wageOf(p), 0);
@@ -495,6 +538,11 @@ export function startNextSeason(prev: SeasonState): SeasonState {
   const season = state.season;
   for (const team of state.teams) {
     const out = retirees.get(team.id) ?? [];
+    // Long careers are remembered by the club, whoever is managing it.
+    for (const r of out) {
+      const kept = recordRetirement(state.legends, team.id, r, overall(r), state.careerStats[r.id], lastSeason);
+      if (kept && team.id === state.managedId) news.push(`${r.name} retires after ${kept.seasons} seasons and ${kept.apps} appearances. A club legend.`);
+    }
     if (team.id === state.managedId) {
       for (const r of out) {
         r.retiring = true;
