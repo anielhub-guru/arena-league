@@ -398,9 +398,13 @@ export class LiveMatch {
       this.arenaOpen = true;
       this.stage.classList.add("hl");
       this.setPressure(ev.x0 / 100);
+      // A cutaway of the action itself (a kick) comes first; one of a result or a reaction comes after the scene.
+      const before = this.cutaways.playsBefore(ev);
+      if (before && !this.skipping && !this.disposed) await this.cutaways.play(ev, false);
+      if (this.disposed) return;
       await this.arena.play(scene, () => (this.paused ? 0 : this.speed));
       // Now and then the moment gets an illustrated cutaway on top of the arena frame.
-      if (!this.skipping && !this.disposed) await this.cutaways.play(ev, true);
+      if (!before && !this.skipping && !this.disposed) await this.cutaways.play(ev, true);
       this.inHighlight = false;
       if (this.disposed) return;
       this.reveal(ev);

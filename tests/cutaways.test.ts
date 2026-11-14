@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { generateTeams } from "../src/league/teams";
 import { simulateMatch } from "../src/engine/match";
 import { HAIR } from "../src/league/look";
-import { CHANCE, LAB_HAIR, STORY } from "../src/cutaways/data";
+import { BEFORE, CHANCE, LAB_HAIR, STORY } from "../src/cutaways/data";
 import { kindsFor } from "../src/cutaways";
 
 const art = (name: string) => existsSync(new URL(`../src/cutaways/art/${name}.webp`, import.meta.url));
@@ -39,10 +39,22 @@ describe("illustrated cutaways", () => {
       for (const ev of log.events) {
         const kinds = kindsFor(ev);
         kinds.forEach((k) => seen.add(k));
-        if (["kickoff", "halftime", "fulltime", "sub", "talk", "conversion", "penalty-goal"].includes(ev.type)) expect(kinds).toEqual([]);
+        if (["kickoff", "halftime", "fulltime", "sub", "talk"].includes(ev.type)) expect(kinds).toEqual([]);
       }
     }
     expect(seen.size).toBeGreaterThan(2);
     for (const k of seen) expect(CHANCE).toHaveProperty(k);
+  });
+
+  it("covers interceptions and kicks, and only a kick's own action plays before the scene", () => {
+    const base = { sec: 0, step: 0, minute: 1, x0: 50, x1: 60, text: "", key: true, homeScore: 0, awayScore: 0 };
+    const kinds = (type: string, variant?: string) => kindsFor({ ...base, type, variant } as never);
+    expect(kinds("intercept")).toEqual(["intercept"]);
+    expect(kinds("conversion", "good")).toEqual(["goal"]);
+    expect(kinds("penalty-miss", "wide")).toEqual(["goalmiss"]);
+    expect(kinds("try", "grubber")).toEqual(["kickchase"]);
+    expect(kinds("kick", "chip-lost")).toEqual(["kickchase"]);
+    expect(kinds("kick", "live")).toEqual([]);
+    expect([...BEFORE]).toEqual(["kickchase"]);
   });
 });

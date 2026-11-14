@@ -5,7 +5,7 @@
  */
 
 export type Transition = "diagonal" | "split" | "hard" | "dots";
-export type Kind = "bighit" | "grounding" | "celebration" | "lastditch" | "jackal" | "card" | "waist" | "double" | "ankle";
+export type Kind = "bighit" | "grounding" | "celebration" | "lastditch" | "jackal" | "card" | "waist" | "double" | "ankle" | "intercept" | "goalmiss" | "goal" | "kickchase";
 export type StoryKind = Exclude<Kind, "bighit">;
 
 /** Seconds, on the lab's scene clock: contact is when the cutaway pose begins, end is when it settles. */
@@ -44,7 +44,17 @@ export const CHANCE: Record<Kind, number> = {
   double: 0.12,
   lastditch: 0.25,
   ankle: 0.2,
+  intercept: 0.4,
+  goalmiss: 0.25,
+  goal: 0.15,
+  kickchase: 0.4,
 };
+
+/**
+ * Cutaways that show the action itself, so they play before the arena scene. Every other kind shows a
+ * result or a reaction, and plays after it. A kick drawn after the ball has already landed makes no sense.
+ */
+export const BEFORE: ReadonlySet<Kind> = new Set<Kind>(["kickchase"]);
 
 /** Most cutaways in one match: they are a treat, two or three a game. */
 export const MAX_PER_MATCH = 3;
@@ -76,6 +86,8 @@ export interface StorySpec {
   ground: number;
   /** The body settles from a tilt, for the diving pose. */
   tilt: number;
+  /** Draws goalposts behind the player. */
+  posts?: boolean;
 }
 
 const BIG: Frame = { width: 450, height: 280, rise: 5, slide: 30 };
@@ -105,6 +117,11 @@ export const STORY: Record<StoryKind, StorySpec> = {
     tilt: 0,
   },
   ankle: { art: () => "ankle", frame: { ...BIG, rise: 20 }, regions: () => [[0.12, 0.44, 0.33, 0.32]], ground: 390, tilt: 0 },
+  // These four show one player, so there is no second head to swap in.
+  intercept: { art: () => "intercept", frame: { width: 310, height: 276, rise: 8, slide: 32 }, regions: () => [], ground: 390, tilt: 0 },
+  goalmiss: { art: () => "goalmiss", frame: { width: 250, height: 270, rise: 0, slide: 0 }, regions: () => [], ground: 390, tilt: 0, posts: true },
+  goal: { art: () => "goal", frame: { width: 290, height: 280, rise: 5, slide: 6 }, regions: () => [], ground: 390, tilt: 0, posts: true },
+  kickchase: { art: () => "kickchase", frame: { width: 385, height: 268, rise: 0, slide: 20 }, regions: () => [], ground: 390, tilt: 0 },
 };
 
 /** The original "big hit" is drawn from one sprite, with hair drawn on top. Paths are in the sprite's 152 x 260 space. */

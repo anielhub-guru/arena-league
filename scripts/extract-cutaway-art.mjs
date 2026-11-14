@@ -1,31 +1,40 @@
 // Pulls the cutaway artwork out of the silhouette lab page and writes it to src/cutaways/art.
-// Usage: npm run cutaways:extract -- /path/to/dominion-multi-test.html
-// The lab page keeps its art as base64 arrays. Only the art is extracted: the framing and timing
+// Usage: npm run cutaways:extract -- /path/to/dominion-multi-test.html /path/to/dominion-solo-test.html
+// The multi page holds the first nine cutaways; the solo page holds the interception, kicking and
+// kick-and-chase art. The lab pages keep their art as base64 arrays. Only the art is extracted: the framing and timing
 // tables live in src/cutaways/data.ts and are edited by hand.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
-const src = process.argv[2];
-if (!src) {
-  console.error("Usage: npm run cutaways:extract -- <path to the lab html>");
+const [src, soloSrc] = process.argv.slice(2);
+if (!src || !soloSrc) {
+  console.error("Usage: npm run cutaways:extract -- <path to dominion-multi-test.html> <path to dominion-solo-test.html>");
   process.exit(1);
 }
 const out = new URL("../src/cutaways/art/", import.meta.url);
 mkdirSync(out, { recursive: true });
-const lines = readFileSync(src, "utf8").split("\n");
 
-/** Reads `const name = [...]` (possibly followed by .map(...)) as JSON. */
-function array(name) {
-  const line = lines.find((l) => l.startsWith(`const ${name}`));
-  if (!line) throw new Error(`${name} not found in ${src}`);
-  return JSON.parse(line.slice(line.indexOf("=") + 1).trim().replace(/;$/, "").replace(/\.map\(.*\)$/, ""));
-}
+/** Reads `const name = [...]` (possibly followed by .map(...)) from a lab page as JSON. */
+const reader = (file) => {
+  const lines = readFileSync(file, "utf8").split("\n");
+  return (name) => {
+    const line = lines.find((l) => l.startsWith(`const ${name}`));
+    if (!line) throw new Error(`${name} not found in ${file}`);
+    return JSON.parse(line.slice(line.indexOf("=") + 1).trim().replace(/;$/, "").replace(/\.map\(.*\)$/, ""));
+  };
+};
+const array = reader(src);
+const soloArray = reader(soloSrc);
 const tackle = array("tackleArt");
 const action = array("actionArt");
 const grounding = array("groundingArt");
 const jackal = array("jackalArt");
 const main = array("mainLooks");
 const extra = array("extraLooks");
-const spriteLine = lines.find((l) => l.startsWith("const spriteUri="));
+const soloAction = soloArray("actionArt");
+const soloTackle = soloArray("tackleArt");
+const soloMain = soloArray("mainLooks");
+const soloExtra = soloArray("extraLooks");
+const spriteLine = readFileSync(src, "utf8").split("\n").find((l) => l.startsWith("const spriteUri="));
 const sprite = spriteLine?.match(/'(data:image\/webp;base64,[^']+)'/)?.[1];
 if (!sprite) throw new Error("spriteUri not found");
 
@@ -48,6 +57,11 @@ const KINDS = {
   waist: [tackle[0], (l) => extra[l][3]],
   double: [tackle[1], (l) => extra[l][4]],
   ankle: [tackle[2], (l) => extra[l][5]],
+  // From the solo page, where only these poses are filled in.
+  intercept: [soloAction[4], (l) => soloMain[l][4]],
+  goalmiss: [soloAction[5], (l) => soloMain[l][5]],
+  goal: [soloTackle[3], (l) => soloExtra[l][6]],
+  kickchase: [soloAction[8], (l) => soloMain[l][8]],
 };
 save("sprite", sprite);
 for (const [kind, [original, look]] of Object.entries(KINDS)) {

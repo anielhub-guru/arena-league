@@ -2,7 +2,7 @@ import { h } from "../dom";
 import type { Look, MatchEvent, Player, Team } from "../engine/types";
 import { BUILDS, lookOf } from "../league/look";
 import { rand } from "../viewer/scenes";
-import { CHANCE, COOLDOWN_SEC, LAB_HAIR, MAX_PER_MATCH, TRANSITIONS, type Kind, type Transition } from "./data";
+import { BEFORE, CHANCE, COOLDOWN_SEC, LAB_HAIR, MAX_PER_MATCH, TRANSITIONS, type Kind, type Transition } from "./data";
 import { CANVAS_SIZE, cutawayLength, drawFrame, prepare, snapshotField, type Athlete, type CutawayRequest } from "./render";
 
 /**
@@ -43,7 +43,19 @@ export function kindsFor(ev: MatchEvent): Kind[] {
     case "red":
       return ["card"];
     case "try":
-      return v === "power" || v === "break" ? ["grounding", "celebration"] : [];
+      return v === "power" || v === "break" ? ["grounding", "celebration"] : v === "grubber" || v === "chip" ? ["kickchase"] : [];
+    case "kick":
+      return v?.startsWith("grubber") || v?.startsWith("chip") ? ["kickchase"] : [];
+    case "intercept":
+      return ["intercept"];
+    case "conversion":
+    case "penalty-goal":
+    case "drop-goal":
+      return ["goal"];
+    case "conversion-miss":
+    case "penalty-miss":
+    case "drop-miss":
+      return ["goalmiss"];
     case "turnover":
       return v === "sixth" ? ["bighit", "waist", "double"] : ["jackal"];
     case "carry":
@@ -104,6 +116,11 @@ export class Cutaways {
     return team.players.find((p) => (by.id ? p.id === by.id : p.name === by.name));
   }
 
+  /** True if the cutaway for this event shows the action itself, so it should play before the arena scene. */
+  playsBefore(ev: MatchEvent): boolean {
+    return kindsFor(ev).some((k) => BEFORE.has(k));
+  }
+
   /** Works out what to show for an event, or null for the usual presentation. */
   plan(ev: MatchEvent): CutawayRequest | null {
     const { home, away } = this.host;
@@ -117,6 +134,13 @@ export class Cutaways {
     let b: Player | undefined;
     if (kind === "card") {
       a = this.player(ev.team === 0 ? home : away, { id: ev.pid });
+    } else if (kind === "kickchase") {
+      // Always the kicker, not the chaser who may score: she is the attacking side's slot `ki`.
+      const atk = ev.att === 0 ? home : away;
+      a = ev.cast?.ki !== undefined ? this.player(atk, { name: ev.cast.a[ev.cast.ki] }) : undefined;
+    } else if (kind === "intercept" || kind === "goal" || kind === "goalmiss") {
+      // One player, named on the event: the interceptor, or the kicker.
+      a = this.player(ev.team === 0 ? home : away, { name: ev.player });
     } else if (ev.cast && ev.att !== undefined) {
       const atk = ev.att === 0 ? home : away;
       const def = ev.att === 0 ? away : home;

@@ -129,6 +129,11 @@ async function storyPainter(kind: StoryKind, req: CutawayRequest): Promise<Paint
     for (let y = 132; y < 230; y += 18) line(ctx, -offset, y, W, y, "#23382c");
     line(ctx, 0, 248, W, 248, "#526c59", 2);
     if (kind === "grounding") line(ctx, 642, 258, 732, 430, "#819d87", 3);
+    if (spec.posts) {
+      line(ctx, 700, 125, 700, 365, "#819d87", 3);
+      line(ctx, 785, 125, 785, 365, "#819d87", 3);
+      line(ctx, 700, 220, 785, 220, "#819d87", 3);
+    }
     for (let i = 0; i < 30; i++) {
       const x = (i * 173) % 960, y = 270 + ((i * 37) % 144);
       line(ctx, x - offset, y, x + 18 - offset, y, "#253a2e");
