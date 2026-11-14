@@ -4,6 +4,10 @@ Versions follow `MAJOR.MINOR.PATCH`. The version lives in `package.json` and is 
 `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` (a test fails if they
 drift apart). It is shown in the app footer and on the new-game screen.
 
+## Unreleased
+
+- Added a fictional-content disclaimer to the league picker screen and the README.
+
 ## 0.10.0
 
 - Illustrated cutaways in the women's league. Now and then a moment is shown as a detailed drawing over the

@@ -106,6 +106,7 @@ td.dn { color: var(--bad); }
 /* Picker & dialog */
 .picker { max-width: 520px; margin: 24px auto; }
 .picker h1 { color: var(--acc); letter-spacing: 2px; font-size: 18px; }
+.picker .disclaimer { color: var(--dim); font-size: 11px; line-height: 1.5; }
 .picker.wide { max-width: 820px; }
 .select-tag { text-align: center; letter-spacing: 6px; font-size: 11px; color: var(--dim); margin: 18px 0 12px; }
 .cs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
