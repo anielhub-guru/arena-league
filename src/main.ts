@@ -2,7 +2,7 @@ import { h } from "./dom";
 import menPortrait from "./assets/men.png";
 import womenPortrait from "./assets/women.png";
 import { avatarCanvas } from "./viewer/avatar";
-import { describeLook, lookOf } from "./league/look";
+import { lookOf } from "./league/look";
 import { ATTRS, ROLES, type Gender, type MatchLog, type Player, type ShapeId, type TacticId, type Team } from "./engine/types";
 import { SHAPES, TACTICS, adviseShape, attackFit, slotPlayer } from "./engine/match";
 import { MAX_BUYS, fmtMoney, sellPrice, teenSalePrice, wageOf } from "./league/economy";
@@ -703,7 +703,7 @@ function avatarSlot(s: SeasonState, team: Team): HTMLElement {
   const p = team.players.find((x) => x.id === avatarPlayer) ?? team.players.find((x) => x.id === team.lineup[0])!;
   const look = lookOf(p, s.gender);
   if (!look) return h("div", { class: "avatar-slot", title: "Player avatar (placeholder)" }, h("img", { src: menPortrait, alt: "Player avatar placeholder" }));
-  return h("div", { class: "avatar-slot", title: `${p.name}: ${describeLook(look)}` }, avatarCanvas(look, `${p.name} avatar`), h("div", { class: "avatar-cap" }, p.name, h("small", {}, describeLook(look))));
+  return h("div", { class: "avatar-slot", title: p.name }, avatarCanvas(look, `${p.name} avatar`), h("div", { class: "avatar-cap" }, p.name));
 }
 
 function squadView(s: SeasonState): HTMLElement {

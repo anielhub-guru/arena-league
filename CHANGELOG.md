@@ -8,7 +8,7 @@ drift apart). It is shown in the app footer and on the new-game screen.
 
 - Player avatars. Every player in the women's league is created with a look: one of five hairstyles, one of two
   base faces and a build (lean, balanced or broad). The squad screen shows the avatar of the player you last
-  clicked, or your first starter, with their hairstyle and build. Prospects, reserves and new signings get a
+  clicked, or your first starter, with their name. Prospects, reserves and new signings get a
   look the same way, and players from older saves are given a stable one. The men's league keeps its placeholder
   until its artwork exists. The look also stores eyes, nose, lips and jaw adjustments (all at the original for
   now) ready for a future customise option.
