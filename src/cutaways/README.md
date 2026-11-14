@@ -1,6 +1,6 @@
 # Illustrated cutaways
 
-Now and then a match moment (a card, a try, a big tackle, a jackal turnover, an interception, a kick) is shown as a detailed
+Now and then a match moment (a card, a try, a big tackle, a jackal turnover, an interception, a kick, the kick-off huddle) is shown as a detailed
 drawing over the arena, instead of only the arena animation. The arena plays first and the cutaway is a
 bonus on top, except for kinds in `BEFORE` (data.ts), which show the action itself and play ahead of it:
 a kick drawn after the ball has landed makes no sense. If a cutaway does not apply or its art fails to load, nothing changes.

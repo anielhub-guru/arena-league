@@ -152,6 +152,7 @@ async function storyPainter(kind: StoryKind, req: CutawayRequest): Promise<Paint
       const w = width * scale, h = height * scale;
       ctx.translate(480 + frame.slide * u, spec.ground - frame.rise * (1 - u));
       ctx.rotate(tilt);
+      if (spec.bob) ctx.translate(0, -3 * Math.sin(u * 4 * Math.PI) ** 2);
       ctx.drawImage(art.canvas, left, top, width, height, -w / 2, -h, w, h);
     }
     ctx.restore();

@@ -34,6 +34,7 @@ const soloAction = soloArray("actionArt");
 const soloTackle = soloArray("tackleArt");
 const soloMain = soloArray("mainLooks");
 const soloExtra = soloArray("extraLooks");
+const captain = readFileSync(soloSrc, "utf8").match(/const captainArt\s*=\s*loadArt\('(data:image\/webp;base64,[^']+)'/)?.[1];
 const spriteLine = readFileSync(src, "utf8").split("\n").find((l) => l.startsWith("const spriteUri="));
 const sprite = spriteLine?.match(/'(data:image\/webp;base64,[^']+)'/)?.[1];
 if (!sprite) throw new Error("spriteUri not found");
@@ -62,6 +63,8 @@ const KINDS = {
   goalmiss: [soloAction[5], (l) => soloMain[l][5]],
   goal: [soloTackle[3], (l) => soloExtra[l][6]],
   kickchase: [soloAction[8], (l) => soloMain[l][8]],
+  pass: [soloAction[7], (l) => soloMain[l][7]],
+  huddle: [captain, (l) => soloExtra[l][2]],
 };
 save("sprite", sprite);
 for (const [kind, [original, look]] of Object.entries(KINDS)) {

@@ -46,6 +46,8 @@ export function kindsFor(ev: MatchEvent): Kind[] {
       return v === "power" || v === "break" ? ["grounding", "celebration"] : v === "grubber" || v === "chip" ? ["kickchase"] : [];
     case "kick":
       return v?.startsWith("grubber") || v?.startsWith("chip") ? ["kickchase"] : [];
+    case "kickoff":
+      return ["huddle", "pass"];
     case "intercept":
       return ["intercept"];
     case "conversion":
@@ -138,6 +140,11 @@ export class Cutaways {
       // Always the kicker, not the chaser who may score: she is the attacking side's slot `ki`.
       const atk = ev.att === 0 ? home : away;
       a = ev.cast?.ki !== undefined ? this.player(atk, { name: ev.cast.a[ev.cast.ki] }) : undefined;
+    } else if (kind === "huddle" || kind === "pass") {
+      // The match intro: a seeded side, then its captain (the oldest player) or one of its wingers.
+      const team = rand(ev, 46) < 0.5 ? home : away;
+      const squad = team.players;
+      a = kind === "huddle" ? [...squad].sort((x, y) => y.age - x.age)[0] : (() => { const w = squad.filter((p) => p.role === "Winger"); return w[Math.floor(rand(ev, 47) * w.length)]; })();
     } else if (kind === "intercept" || kind === "goal" || kind === "goalmiss") {
       // One player, named on the event: the interceptor, or the kicker.
       a = this.player(ev.team === 0 ? home : away, { name: ev.player });

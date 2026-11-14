@@ -5,7 +5,7 @@
  */
 
 export type Transition = "diagonal" | "split" | "hard" | "dots";
-export type Kind = "bighit" | "grounding" | "celebration" | "lastditch" | "jackal" | "card" | "waist" | "double" | "ankle" | "intercept" | "goalmiss" | "goal" | "kickchase";
+export type Kind = "bighit" | "grounding" | "celebration" | "lastditch" | "jackal" | "card" | "waist" | "double" | "ankle" | "intercept" | "goalmiss" | "goal" | "kickchase" | "huddle" | "pass";
 export type StoryKind = Exclude<Kind, "bighit">;
 
 /** Seconds, on the lab's scene clock: contact is when the cutaway pose begins, end is when it settles. */
@@ -48,6 +48,8 @@ export const CHANCE: Record<Kind, number> = {
   goalmiss: 0.25,
   goal: 0.15,
   kickchase: 0.4,
+  huddle: 0.7,
+  pass: 0.5,
 };
 
 /**
@@ -88,6 +90,8 @@ export interface StorySpec {
   tilt: number;
   /** Draws goalposts behind the player. */
   posts?: boolean;
+  /** The figure bobs on the spot, for the huddle. */
+  bob?: boolean;
 }
 
 const BIG: Frame = { width: 450, height: 280, rise: 5, slide: 30 };
@@ -122,6 +126,9 @@ export const STORY: Record<StoryKind, StorySpec> = {
   goalmiss: { art: () => "goalmiss", frame: { width: 250, height: 270, rise: 0, slide: 0 }, regions: () => [], ground: 390, tilt: 0, posts: true },
   goal: { art: () => "goal", frame: { width: 290, height: 280, rise: 5, slide: 6 }, regions: () => [], ground: 390, tilt: 0, posts: true },
   kickchase: { art: () => "kickchase", frame: { width: 385, height: 268, rise: 0, slide: 20 }, regions: () => [], ground: 390, tilt: 0 },
+  // The two kick-off cutaways: the captain calls the team in, and a winger shows for a pass.
+  huddle: { art: () => "huddle", frame: BIG, regions: () => [], ground: 390, tilt: 0, bob: true },
+  pass: { art: () => "pass", frame: { width: 360, height: 272, rise: 0, slide: 18 }, regions: () => [], ground: 390, tilt: 0 },
 };
 
 /** The original "big hit" is drawn from one sprite, with hair drawn on top. Paths are in the sprite's 152 x 260 space. */

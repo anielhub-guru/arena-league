@@ -421,7 +421,7 @@ export class LiveMatch {
     await this.holdPrevious();
     if (this.disposed) return;
     this.reveal(ev);
-    if ((ev.type === "yellow" || ev.type === "red") && !this.skipping && this.cutaways.plan(ev)) await this.cardCutaway(ev);
+    if ((ev.type === "yellow" || ev.type === "red" || ev.type === "kickoff") && !this.skipping && this.cutaways.plan(ev)) await this.cardCutaway(ev);
     const sim = this.opts.sim;
     const ms = this.opts.managedSide;
     if (sim && ms !== undefined && (ev.type === "yellow" || ev.type === "red") && ev.team === ms) {
@@ -440,7 +440,7 @@ export class LiveMatch {
     }
   }
 
-  /** A card has no arena scene, so open the stage for the illustrated cutaway on its own. */
+  /** A card or the kick-off has no arena scene, so open the stage for the illustrated cutaway on its own. */
   private async cardCutaway(ev: MatchEvent) {
     this.inHighlight = true;
     this.clockFrozen = true;

@@ -39,7 +39,7 @@ describe("illustrated cutaways", () => {
       for (const ev of log.events) {
         const kinds = kindsFor(ev);
         kinds.forEach((k) => seen.add(k));
-        if (["kickoff", "halftime", "fulltime", "sub", "talk"].includes(ev.type)) expect(kinds).toEqual([]);
+        if (["halftime", "fulltime", "sub", "talk"].includes(ev.type)) expect(kinds).toEqual([]);
       }
     }
     expect(seen.size).toBeGreaterThan(2);
@@ -55,6 +55,7 @@ describe("illustrated cutaways", () => {
     expect(kinds("try", "grubber")).toEqual(["kickchase"]);
     expect(kinds("kick", "chip-lost")).toEqual(["kickchase"]);
     expect(kinds("kick", "live")).toEqual([]);
+    expect(kinds("kickoff")).toEqual(["huddle", "pass"]);
     expect([...BEFORE]).toEqual(["kickchase"]);
   });
 });

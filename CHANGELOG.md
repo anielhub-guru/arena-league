@@ -14,6 +14,7 @@ drift apart). It is shown in the app footer and on the new-game screen.
   catch up. The Player progress table shows each player's appearances and a pace tag (Fast, Steady or
   Stalling: needs games). AI clubs follow the same rules.
 - Added a fictional-content disclaimer to the league picker screen and the README.
+- Two kick-off cutaways: the captain calls the team in, or a winger shows for a pass. One side is picked at random and the captain is its oldest player.
 - Four more illustrated cutaways: an interception, a missed kick at goal, a scored kick at goal (conversion,
   penalty or drop goal) and a grubber or chip and chase. The kick and chase drawing shows the kick itself, so it
   plays before the arena scene; the others show a result or a reaction and play after it.
