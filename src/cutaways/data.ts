@@ -46,8 +46,8 @@ export const CHANCE: Record<Kind, number> = {
   ankle: 0.2,
 };
 
-/** Most cutaways in one match: they are a treat, one or two a game. */
-export const MAX_PER_MATCH = 2;
+/** Most cutaways in one match: they are a treat, two or three a game. */
+export const MAX_PER_MATCH = 3;
 
 /** Fewest match seconds between two cutaways in one match, so they stay a treat. */
 export const COOLDOWN_SEC = 420;

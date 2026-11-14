@@ -22,7 +22,7 @@ The only hook into the rest of the game is in `viewer/live.ts` (`Cutaways`, `cut
 
 ## Changing how often they appear
 
-`CHANCE` (per kind), `COOLDOWN_SEC` and `MAX_PER_MATCH` (two) in `data.ts`. The roll is seeded from the event, so a replay shows
+`CHANCE` (per kind), `COOLDOWN_SEC` and `MAX_PER_MATCH` (three) in `data.ts`. The roll is seeded from the event, so a replay shows
 the same cutaways.
 
 ## Adding a new cutaway
