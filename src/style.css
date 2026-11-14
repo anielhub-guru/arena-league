@@ -439,3 +439,11 @@ h2.sub { margin-top: 14px; }
 .avatar-badge .avatar-art { height: 92%; width: auto; max-width: 98%; object-fit: contain; object-position: bottom; }
 .potm-row { display: flex; gap: 10px; align-items: center; margin-top: 6px; }
 .potm-row .potm-line { margin-top: 0; }
+
+/* Illustrated cutaways (src/cutaways) */
+.stage { position: relative; }
+.cutaway { position: absolute; top: 0; left: 0; right: 0; height: calc(min(372px, 52vh) - 64px); background: #101915; z-index: 2; }
+.cutaway[hidden] { display: none; }
+.cutaway-art { display: block; width: 100%; height: 100%; object-fit: contain; }
+.cutaway-controls { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; }
+.cutaway-controls .shake { display: inline-flex; align-items: center; gap: 4px; color: var(--dim); }

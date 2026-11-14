@@ -6,6 +6,7 @@ import { buildScene } from "./scenes";
 import { scorerLines, standoutLines, statBars } from "./text";
 import { teamColor } from "../league/teams";
 import { avatarBadge } from "./avatar";
+import { Cutaways } from "../cutaways";
 import { describeLine, playerOfTheMatch, teamBest } from "../league/awards";
 
 /** Sets an element's text colour and returns it. */
@@ -69,6 +70,7 @@ const fmtClock = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, "0
 export class LiveMatch {
   readonly root: HTMLElement;
   private arena: ArenaView;
+  private cutaways: Cutaways;
   private opts: LiveOptions;
   private feed = h("div", { class: "feed" });
   private score = h("div", { class: "sb-score" }, "0 - 0");
@@ -119,6 +121,7 @@ export class LiveMatch {
   constructor(opts: LiveOptions) {
     this.opts = opts;
     this.arena = new ArenaView(opts.home.short, opts.away.short, teamColor(opts.home.id), teamColor(opts.away.id, "#f0b35a"));
+    this.cutaways = new Cutaways({ home: opts.home, away: opts.away, stage: this.stage, arena: this.arena.canvas, rate: () => (this.paused ? 0 : this.speed) });
     if (opts.log) {
       const byStep = new Map<number, MatchEvent[]>();
       for (const e of opts.log.events) byStep.set(e.step, [...(byStep.get(e.step) ?? []), e]);
@@ -138,6 +141,7 @@ export class LiveMatch {
     this.disposed = true;
     this.done = true;
     window.clearInterval(this.ticker);
+    this.cutaways.cancel();
     this.arena.dispose();
     this.wake?.();
   }
@@ -172,14 +176,14 @@ export class LiveMatch {
       this.opts.onBack?.();
     };
     this.backBtn.hidden = !this.opts.onBack;
-    const controls = h("div", { class: "controls" }, this.backBtn, this.pauseBtn, h("span", { class: "sp" }, "Speed"), ...this.speedBtns, h("span", { class: "spacer" }), this.helpBtn, this.skipBtn);
+    const controls = h("div", { class: "controls" }, this.backBtn, this.pauseBtn, h("span", { class: "sp" }, "Speed"), ...this.speedBtns, this.cutaways.controls(), h("span", { class: "spacer" }), this.helpBtn, this.skipBtn);
 
     const scoreboard = h("div", { class: "scoreboard" },
       tint(h("div", { class: "sb-team home" }, home.name), teamColor(home.id)),
       h("div", { class: "sb-mid" }, this.score, this.clock, h("div", { class: "sb-bar" }, this.progress)),
       tint(h("div", { class: "sb-team away" }, away.name), teamColor(away.id, "#f0b35a")));
 
-    this.stage.append(this.arena.canvas, h("div", { class: "cm" }, this.cmTag, this.cmText));
+    this.stage.append(this.arena.canvas, this.cutaways.layer, h("div", { class: "cm" }, this.cmTag, this.cmText));
     this.cmTag.textContent = "MATCH CENTRE";
     this.cmText.textContent = `${home.name} v ${away.name}`;
 
@@ -305,6 +309,7 @@ export class LiveMatch {
     this.started = true;
     this.clockFrozen = false;
     this.arena.cancel();
+    this.cutaways.cancel();
     this.talkBox?.remove();
     this.talkBox = null;
     this.status.textContent = "Skipping to full time...";
@@ -394,6 +399,8 @@ export class LiveMatch {
       this.stage.classList.add("hl");
       this.setPressure(ev.x0 / 100);
       await this.arena.play(scene, () => (this.paused ? 0 : this.speed));
+      // Now and then the moment gets an illustrated cutaway on top of the arena frame.
+      if (!this.skipping && !this.disposed) await this.cutaways.play(ev, true);
       this.inHighlight = false;
       if (this.disposed) return;
       this.reveal(ev);
@@ -410,6 +417,7 @@ export class LiveMatch {
     await this.holdPrevious();
     if (this.disposed) return;
     this.reveal(ev);
+    if ((ev.type === "yellow" || ev.type === "red") && !this.skipping && this.cutaways.plan(ev)) await this.cardCutaway(ev);
     const sim = this.opts.sim;
     const ms = this.opts.managedSide;
     if (sim && ms !== undefined && (ev.type === "yellow" || ev.type === "red") && ev.team === ms) {
@@ -426,6 +434,18 @@ export class LiveMatch {
         window.setTimeout(() => (this.clockFrozen = false), 2500 / this.speed);
       }
     }
+  }
+
+  /** A card has no arena scene, so open the stage for the illustrated cutaway on its own. */
+  private async cardCutaway(ev: MatchEvent) {
+    this.inHighlight = true;
+    this.clockFrozen = true;
+    this.arenaOpen = true;
+    this.stage.classList.add("hl");
+    await this.cutaways.play(ev, false);
+    this.inHighlight = false;
+    this.clockFrozen = false;
+    this.arenaCloseAt = performance.now();
   }
 
   /** Puts the event's line on the commentary card and updates the scoreboard. */
