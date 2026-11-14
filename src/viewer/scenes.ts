@@ -809,6 +809,35 @@ function buildFullScene(ev: MatchEvent): Scene | null {
         q[A(3)] = { x: land.x - 3.5, y: 0.7 };
       }, { k: "held", by: D(4) }, { hits: [{ kind: "tackle", runner: D(4), other: A(1), result: "down", at: 0.3 }], cap: "Flattened by the chaser the moment the ball lands" });
     }
+  } else if (type === "drop-goal" && ev.variant === "bomb") {
+    // The same towering kick as the dead-ball scene, but this one holds its line and scores.
+    const kid = A(ai);
+    initBall = { k: "held", by: A(2) };
+    const bx = x0;
+    if (ai !== 2) {
+      sb.go(520, (q) => {
+        formation(q, bx, LANE_A[ai], ai);
+        line(q, bx, 0.5, 8);
+      }, { k: "pass", from: A(2), to: kid, arc: 6 }, { cap: "Pass back to the kicker" });
+    }
+    const land = { x: 105, y: 0.5 };
+    sb.go(750, (q) => {
+      q[kid] = { x: bx - 2, y: q[kid].y };
+      q[A(1)] = { x: bx - 1, y: 0.66 };
+      q[A(3)] = { x: bx - 1, y: 0.9 };
+      q[D(4)] = { x: 97, y: 0.5 };
+      for (let i = 0; i < 4; i++) q[D(i)] = { x: bx + 9 + i, y: LANE_D[i] };
+    }, { k: "held", by: kid }, { cap: "The kicker takes a step back. Chasers line up." });
+    sb.go(1800, (q) => {
+      q[kid] = { x: bx + 1, y: q[kid].y };
+      q[A(1)] = { x: 88, y: 0.62 };
+      q[A(3)] = { x: 90, y: 0.85 };
+      q[A(0)] = { x: 84, y: 0.4 };
+      for (let i = 0; i < 4; i++) q[D(i)] = { x: 82 + i * 2, y: LANE_D[i] };
+      q[D(4)] = { x: 97, y: 0.5 };
+    }, { k: "fly", from: kid, to: land, arc: 90, style: "punt" }, { banner: { text: "KICK!", color: GREEN, sub: ev.player }, cap: "A huge kick. It looks like it will run dead...", fx: { kind: "kick", at: kid } });
+    sb.go(1300, () => {}, { k: "at", p: land }, { banner: { text: "DROP GOAL!", color: GREEN, sub: ev.player }, cap: "It holds its line and drops over the bar between the posts. Three points!", fx: { kind: "ring", at: { x: 100, y: 0.5 }, color: GREEN } });
+    sb.go(500, () => {}, { k: "at", p: land });
   } else if (
     type === "conversion" || type === "conversion-miss" || type === "penalty-goal" || type === "penalty-miss" || type === "drop-goal" || type === "drop-miss"
   ) {

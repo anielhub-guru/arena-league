@@ -35,7 +35,7 @@ describe("highlight scenes", () => {
           expect(on, `${e.type} hit runner`).toContain(h.runner);
           expect(on, `${e.type} hit other`).toContain(h.other);
         }
-        if (/^(conversion|penalty|drop)/.test(e.type)) {
+        if (/^(conversion|penalty|drop)/.test(e.type) && e.variant !== "bomb") {
           expect(sc!.kick, `${e.type} should have a kicker's-view`).toBeDefined();
           expect(sc!.kick!.start).toBeGreaterThan(1000);
           expect(["good", "post-in", "post", "wide", "short"]).toContain(sc!.kick!.outcome);

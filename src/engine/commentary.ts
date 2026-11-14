@@ -119,6 +119,11 @@ const DROP_GOAL: Bank = [
   (f) => `DROP GOAL! Out of nowhere, ${f.k} drops it over from ${f.dist}m. Three points to ${f.team}.`,
   (f) => `DROP GOAL! ${f.k} takes the shot from ${f.dist}m and it sails between the uprights. ${f.team} add three.`,
 ];
+const BOMB_GOAL: Bank = [
+  (f) => `DROP GOAL! ${f.k} launches a huge kick from ${f.dist}m, and instead of running dead it sails right between the posts. ${f.team} take three.`,
+  (f) => `DROP GOAL! Everyone thought ${f.k} had overhit it, but it holds its line from ${f.dist}m and clears the bar. Three points to ${f.team}.`,
+  (f) => `DROP GOAL! A monster from ${f.k}, ${f.dist}m out, and it drops over the crossbar. Pure audacity from ${f.team}.`,
+];
 const DROP_RESTART: Bank = [(f) => `${f.opp} restart from their 22.`, (f) => `${f.opp} take the drop-out from their 22.`];
 const CONVERSION: Bank = [
   (f) => `${f.k} splits the posts with the conversion.`,
@@ -265,6 +270,7 @@ export class Narrator {
   dropGoal(f: Facts, postIn: boolean): string {
     return postIn ? `DROP GOAL! ${this.say("post-in", POST_IN, f)} ${f.team} take three.` : this.say("drop-goal", DROP_GOAL, f);
   }
+  bombGoal = (f: Facts) => this.say("bomb-goal", BOMB_GOAL, f);
   dropMiss(f: Facts, kind: "post" | "wide" | "short"): string {
     return `${this.say(`miss-${kind}`, MISS[kind], f)} ${this.say("drop-restart", DROP_RESTART, f)}`;
   }

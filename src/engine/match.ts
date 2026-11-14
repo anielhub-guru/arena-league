@@ -23,6 +23,8 @@ import type { Attr, EventType, MatchEvent, MatchLog, Player, PlayerLine, Role, S
  */
 export const PHASES = 80;
 /** How readily each tactic plays a grubber or a chip and chase near the line. */
+/** Chance that a territory kick which would run dead is instead a monster kick that scores. */
+const BOMB_CHANCE = 0.1;
 const KICK_AHEAD: Record<TacticId, number> = { attacking: 1.5, balanced: 1, defensive: 0.5, territory: 1.2 };
 export const MAX_SUBS = 3;
 /** How hard fatigue cuts stats by full time: a stamina-60 player loses 0.4 * FATIGUE (about 26%). */
@@ -790,7 +792,15 @@ export class MatchSim {
       const dist = 28 + (eA(k, "kicking") / 100) * 22 + rng.next() * 10;
       A.stats.kicks++;
       const landed = pos + dist;
-      if (landed >= 100) {
+      if (landed >= 100 && pos >= 40 && rng.chance(BOMB_CHANCE)) {
+        // A rare monster kick that is dead on line: it clears the bar and splits the posts.
+        const f = this.facts(A, D, { k: k.name, dist: Math.round(100 - pos), what: "drop goal" });
+        A.score += 3;
+        A.stats.dropGoals++;
+        this.lineOf(A, k).dropGoals++;
+        this.emit("drop-goal", this.narrator.bombGoal(f), true, att, k.name, absX(att, 100), { hl: true, variant: "bomb", ai: A.field.indexOf(k) });
+        this.give(35);
+      } else if (landed >= 100) {
         this.emit("kick", this.narrator.kickDead(this.facts(A, D, { k: k.name })), true, att, k.name, absX(att, 100), { hl: true, variant: "dead", ai: A.field.indexOf(k) });
         this.give(22);
       } else {
