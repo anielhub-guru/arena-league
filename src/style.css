@@ -427,3 +427,7 @@ h2.sub { margin-top: 14px; }
   .squad-card .avatar-slot { width: 220px; height: 220px; }
 }
 .squad-card .avatar-slot img { width: 100%; height: 100%; object-fit: cover; border-radius: 11px; display: block; }
+.squad-card .avatar-slot { position: relative; overflow: hidden; display: grid; place-items: end center; background: radial-gradient(ellipse at bottom, #263c30, #11160f 72%); }
+.squad-card .avatar-slot .avatar-art { height: 88%; width: auto; max-width: 98%; object-fit: contain; object-position: bottom; }
+.squad-card .avatar-cap { position: absolute; left: 0; right: 0; top: 0; padding: 5px 8px; font-size: 12px; font-weight: bold; background: linear-gradient(#11160fcc, transparent); }
+.squad-card .avatar-cap small { display: block; font-weight: normal; color: var(--muted, #9fbaa9); }

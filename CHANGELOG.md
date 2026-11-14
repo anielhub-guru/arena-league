@@ -4,8 +4,14 @@ Versions follow `MAJOR.MINOR.PATCH`. The version lives in `package.json` and is 
 `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` (a test fails if they
 drift apart). It is shown in the app footer and on the new-game screen.
 
-## Unreleased
+## 0.9.0
 
+- Player avatars. Every player in the women's league is created with a look: one of five hairstyles, one of two
+  base faces and a build (lean, balanced or broad). The squad screen shows the avatar of the player you last
+  clicked, or your first starter, with their hairstyle and build. Prospects, reserves and new signings get a
+  look the same way, and players from older saves are given a stable one. The men's league keeps its placeholder
+  until its artwork exists. The look also stores eyes, nose, lips and jaw adjustments (all at the original for
+  now) ready for a future customise option.
 - Rare long-range drop goal: about one in ten territory kicks that would have run dead is instead a monster kick
   that holds its line and splits the posts for three points. The arena shows the usual towering kick, then it
   goes over the bar instead of running dead.

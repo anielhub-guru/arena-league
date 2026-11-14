@@ -1,6 +1,8 @@
 import { h } from "./dom";
 import menPortrait from "./assets/men.png";
 import womenPortrait from "./assets/women.png";
+import { avatarCanvas } from "./viewer/avatar";
+import { describeLook, lookOf } from "./league/look";
 import { ATTRS, ROLES, type Gender, type MatchLog, type Player, type ShapeId, type TacticId, type Team } from "./engine/types";
 import { SHAPES, TACTICS, adviseShape, attackFit, slotPlayer } from "./engine/match";
 import { MAX_BUYS, fmtMoney, sellPrice, teenSalePrice, wageOf } from "./league/economy";
@@ -56,6 +58,8 @@ let historyClub: string | null = null;
 let busy = false;
 let live: LiveMatch | null = null;
 let selectedPlayer: string | null = null;
+/** The player whose avatar the squad screen shows: the last one clicked, else the first starter. */
+let avatarPlayer: string | null = null;
 /** Which stats the Squad tab shows. */
 let statsMode: "season" | "career" = "season";
 let dir = "";
@@ -324,6 +328,7 @@ function playerTable(team: Team, opts: { selectable?: boolean } = {}): HTMLEleme
     if (opts.selectable) {
       tr.classList.add("click");
       tr.onclick = () => {
+        avatarPlayer = p.id;
         if (selectedPlayer === null) selectedPlayer = p.id;
         else if (selectedPlayer === p.id) selectedPlayer = null;
         else {
@@ -693,6 +698,14 @@ function goalCard(s: SeasonState, table: ReturnType<typeof computeStandings>, po
   return card("Season goal and rivalry", ...parts, h("h2", { class: "sub" }, "Rivalry"), ...lines);
 }
 
+/** The avatar beside the squad table. Women's players get their generated look, men keep the placeholder until their artwork exists. */
+function avatarSlot(s: SeasonState, team: Team): HTMLElement {
+  const p = team.players.find((x) => x.id === avatarPlayer) ?? team.players.find((x) => x.id === team.lineup[0])!;
+  const look = lookOf(p, s.gender);
+  if (!look) return h("div", { class: "avatar-slot", title: "Player avatar (placeholder)" }, h("img", { src: menPortrait, alt: "Player avatar placeholder" }));
+  return h("div", { class: "avatar-slot", title: `${p.name}: ${describeLook(look)}` }, avatarCanvas(look, `${p.name} avatar`), h("div", { class: "avatar-cap" }, p.name, h("small", {}, describeLook(look))));
+}
+
 function squadView(s: SeasonState): HTMLElement {
   const team = teamById(s, s.managedId);
   const hint = selectedPlayer
@@ -790,7 +803,7 @@ function squadView(s: SeasonState): HTMLElement {
   return h("div", { class: "col" },
     h("section", { class: "card squad-card" },
       h("div", { class: "sq-head" }, h("h2", {}, `${team.name} - starting five, bench & reserves`), h("div", { class: "toolbar" }, autoBtn), h("div", { class: "hint" }, hint)),
-      h("div", { class: "avatar-slot", title: "Player avatar (placeholder)" }, h("img", { src: s.gender === "women" ? womenPortrait : menPortrait, alt: "Player avatar placeholder" })),
+      avatarSlot(s, team),
       h("div", { class: "sq-table" }, playerTable(team, { selectable: true })),
     ),
     ...(profileCard ? [profileCard] : []),

@@ -4,6 +4,19 @@ export const ROLES: readonly Role[] = ["Anchor", "Bruiser", "Pivot", "Winger", "
 export type Attr = "power" | "pace" | "handling" | "tackling" | "kicking" | "stamina";
 export const ATTRS: readonly Attr[] = ["power", "pace", "handling", "tackling", "kicking", "stamina"];
 
+/** Avatar appearance. Indices into the lists in league/look.ts. */
+export interface Look {
+  /** Hairstyle / portrait crop, one of the visible hairstyles. */
+  portrait: number;
+  build: number;
+  /** Which of the two base faces. */
+  face: number;
+  eyes: number;
+  nose: number;
+  lips: number;
+  jaw: number;
+}
+
 export interface Player {
   id: string;
   name: string;
@@ -25,6 +38,8 @@ export interface Player {
   scouted?: number;
   /** Retires when the offseason decision is confirmed. */
   retiring?: boolean;
+  /** Avatar look, generated when the player is created. Missing on older saves: see lookOf. */
+  look?: Look;
 }
 
 export type TacticId = "balanced" | "attacking" | "defensive" | "territory";
