@@ -1,7 +1,7 @@
 import { h } from "./dom";
 import menPortrait from "./assets/men.png";
 import womenPortrait from "./assets/women.png";
-import { avatarCanvas } from "./viewer/avatar";
+import { avatarBadge, avatarCanvas } from "./viewer/avatar";
 import { lookOf } from "./league/look";
 import { ATTRS, ROLES, type Gender, type MatchLog, type Player, type ShapeId, type TacticId, type Team } from "./engine/types";
 import { SHAPES, TACTICS, adviseShape, attackFit, slotPlayer } from "./engine/match";
@@ -638,7 +638,7 @@ function overviewView(s: SeasonState): HTMLElement {
     const r = last.result!;
     const btn = h("button", {}, "Replay");
     btn.onclick = () => replayMatch(last.id);
-    left.append(card(`Last result (matchday ${last.matchday})`, h("div", { class: "result" }, `${teamById(s, last.homeId).name}  ${r.homeScore} - ${r.awayScore}  ${teamById(s, last.awayId).name}`), ...(r.potm ? [h("div", { class: "potm-line" }, `★ Player of the match: ${r.potm.name} (${r.potm.club}), rating ${r.potm.rating.toFixed(1)}`)] : []), h("div", { class: "toolbar" }, btn)));
+    left.append(card(`Last result (matchday ${last.matchday})`, h("div", { class: "result" }, `${teamById(s, last.homeId).name}  ${r.homeScore} - ${r.awayScore}  ${teamById(s, last.awayId).name}`), ...(r.potm ? [h("div", { class: "potm-row" }, avatarBadge(teamById(s, last.homeId).players.concat(teamById(s, last.awayId).players).find((p) => p.id === r.potm!.id), s.gender, "md"), h("div", { class: "potm-line" }, `★ Player of the match: ${r.potm.name} (${r.potm.club}), rating ${r.potm.rating.toFixed(1)}`))] : []), h("div", { class: "toolbar" }, btn)));
   }
 
   if (!isSeasonOver(s) && !s.offers?.length && !s.intake) left.append(goalCard(s, table, pos));

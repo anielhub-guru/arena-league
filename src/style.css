@@ -343,9 +343,10 @@ h3.sub { color: var(--acc); font-size: 12px; text-transform: uppercase; letter-s
 .coverbox { border: 1px solid var(--away); padding: 8px; margin-bottom: 10px; }
 .coverbox button { text-align: left; font-size: 11px; }
 .coverbox .rec { color: var(--acc); }
-.potm { border: 1px solid var(--acc); background: #16281e; padding: 8px 10px; margin-bottom: 6px; }
+.potm { border: 1px solid var(--acc); background: #16281e; padding: 8px 10px; margin-bottom: 6px; display: flex; gap: 10px; align-items: center; }
+.potm-text { min-width: 0; }
 .potm-name { color: var(--acc); font-size: 15px; font-weight: bold; }
-.mvp { padding: 2px 0; font-size: 12px; }
+.mvp { padding: 2px 0; font-size: 12px; display: flex; gap: 8px; align-items: center; }
 .potm-line { color: var(--acc); margin-top: 6px; font-size: 12px; }
 
 td.stars { color: #e3cf7a; letter-spacing: 1px; white-space: nowrap; }
@@ -431,3 +432,10 @@ h2.sub { margin-top: 14px; }
 .squad-card .avatar-slot .avatar-art { height: 88%; width: auto; max-width: 98%; object-fit: contain; object-position: bottom; }
 .squad-card .avatar-cap { position: absolute; left: 0; right: 0; top: 0; padding: 5px 8px; font-size: 12px; font-weight: bold; background: linear-gradient(#11160fcc, transparent); }
 .squad-card .avatar-cap small { display: block; font-weight: normal; color: var(--muted, #9fbaa9); }
+
+/* Small framed avatars for player of the match and similar spots. */
+.avatar-badge { flex: none; display: grid; place-items: end center; overflow: hidden; background: radial-gradient(ellipse at bottom, #263c30, #11160f 72%); border: 1px solid var(--line); border-radius: 8px; }
+.avatar-badge.md { width: 64px; height: 64px; } .avatar-badge.sm { width: 32px; height: 32px; border-radius: 6px; }
+.avatar-badge .avatar-art { height: 92%; width: auto; max-width: 98%; object-fit: contain; object-position: bottom; }
+.potm-row { display: flex; gap: 10px; align-items: center; margin-top: 6px; }
+.potm-row .potm-line { margin-top: 0; }

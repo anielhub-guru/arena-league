@@ -1,5 +1,5 @@
-import type { Look } from "../engine/types";
-import { BUILDS } from "../league/look";
+import type { Gender, Look, Player } from "../engine/types";
+import { BUILDS, lookOf } from "../league/look";
 import a0 from "../assets/avatars/a0.webp";
 import a1 from "../assets/avatars/a1.webp";
 import a2 from "../assets/avatars/a2.webp";
@@ -83,4 +83,14 @@ export function avatarCanvas(look: Look, label: string): HTMLCanvasElement {
   canvas.style.transform = `scaleX(${BUILDS[look.build][1]})`;
   void paint(canvas, look).catch(() => canvas.remove());
   return canvas;
+}
+
+/** A small framed avatar for a player, or null when there is no artwork (men's league) or the player has left. */
+export function avatarBadge(p: Player | undefined, gender: Gender, size: "sm" | "md" = "md"): HTMLElement | null {
+  const look = p && lookOf(p, gender);
+  if (!p || !look) return null;
+  const box = document.createElement("div");
+  box.className = `avatar-badge ${size}`;
+  box.append(avatarCanvas(look, `${p.name} avatar`));
+  return box;
 }

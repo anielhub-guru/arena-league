@@ -5,6 +5,7 @@ import { ArenaView } from "./arena";
 import { buildScene } from "./scenes";
 import { scorerLines, standoutLines, statBars } from "./text";
 import { teamColor } from "../league/teams";
+import { avatarBadge } from "./avatar";
 import { describeLine, playerOfTheMatch, teamBest } from "../league/awards";
 
 /** Sets an element's text colour and returns it. */
@@ -551,12 +552,16 @@ export class LiveMatch {
     this.manage.classList.add("on");
     const standout = standoutLines(log);
     const [bestHome, bestAway] = teamBest(log);
+    const badge = (r: { line: { id: string; team: 0 | 1 } }, size: "sm" | "md") => {
+      const team = r.line.team === 0 ? this.opts.home : this.opts.away;
+      return avatarBadge(team.players.find((p) => p.id === r.line.id), team.gender, size);
+    };
     const award = potm
       ? [
           h("div", { class: "lbl" }, "Player of the match"),
-          h("div", { class: "potm" }, h("div", { class: "potm-name" }, `★ ${potm.line.name}`), h("div", { class: "dim" }, `${potm.club}  ·  rating ${potm.rating.toFixed(1)}`), h("div", {}, describeLine(potm.line))),
+          h("div", { class: "potm" }, badge(potm, "md"), h("div", { class: "potm-text" }, h("div", { class: "potm-name" }, `★ ${potm.line.name}`), h("div", { class: "dim" }, `${potm.club}  ·  rating ${potm.rating.toFixed(1)}`), h("div", {}, describeLine(potm.line)))),
           h("div", { class: "lbl" }, "Best on each side"),
-          ...[bestHome, bestAway].filter((r) => r !== null).map((r) => h("div", { class: "mvp" }, h("b", {}, r!.line.name), h("span", { class: "dim" }, `  ${r!.club}  ${r!.rating.toFixed(1)}`))),
+          ...[bestHome, bestAway].filter((r) => r !== null).map((r) => h("div", { class: "mvp" }, badge(r!, "sm"), h("span", {}, h("b", {}, r!.line.name), h("span", { class: "dim" }, `  ${r!.club}  ${r!.rating.toFixed(1)}`)))),
         ]
       : [];
     this.manage.replaceChildren(h("h3", {}, "Full time"), h("div", { class: "exit" }, exitBtn), ...award, h("div", { class: "lbl" }, "Scorers and cards"), h("pre", { class: "scorers" }, scorerLines(log).join("\n") || "No scores."), ...(standout.length ? [h("div", { class: "lbl" }, "Standout players"), h("pre", { class: "scorers" }, standout.join("\n"))] : []), h("div", { class: "lbl" }, "Match stats"), statBars(log));
