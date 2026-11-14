@@ -21,6 +21,12 @@ export const TEEN_RATE = 0.25;
 export const PRIZES = [4500, 3600, 2800, 2200, 1700, 1300, 1000, 800];
 /** Match winnings for the manager's club. */
 export const MATCH_PAY = { win: 200, draw: 100, loss: 50 };
+/** Board bonus for meeting the club goal, and the larger one for smashing it. */
+export const GOAL_BONUS = { met: 600, smashed: 1500 };
+/** Finishing this many places inside the goal (or this many points clear of second, for a title goal) is smashing it. */
+export const SMASH_PLACES = 2;
+export const SMASH_TITLE_POINTS = 6;
+
 /** The wage bill is this share of the squad's current-ability value, paid each season. */
 export const WAGE_RATE = 0.12;
 
@@ -54,3 +60,27 @@ export function fmtMoney(k: number): string {
   const a = Math.abs(k);
   return a >= 1000 ? `${sign}₦${(a / 1000).toFixed(a >= 10000 ? 0 : 1)}m` : `${sign}₦${a}k`;
 }
+
+export type GoalResult = "missed" | "met" | "smashed";
+
+/** How the finish compares with the goal. Title goals are smashed by winning clear of second place. */
+export function goalResult(finish: number, maxPos: number, clearOfSecond = 0): GoalResult {
+  if (finish > maxPos) return "missed";
+  const smashed = maxPos <= SMASH_PLACES ? finish === 1 && clearOfSecond >= SMASH_TITLE_POINTS : finish <= maxPos - SMASH_PLACES;
+  return smashed ? "smashed" : "met";
+}
+
+export const goalBonus = (r: GoalResult) => (r === "smashed" ? GOAL_BONUS.smashed : r === "met" ? GOAL_BONUS.met : 0);
+
+export const BONUS_FLAVOUR = {
+  met: [
+    "The board nods approval. An envelope arrives with the chairman's thanks.",
+    "Job done. The directors pass round a congratulatory brown envelope.",
+    "The chairman shakes your hand and quietly slides a bonus across the table.",
+  ],
+  smashed: [
+    "The board is in raptures. The chairman is telling the whole of Lagos it was his idea to hire you.",
+    "Beyond all expectations. The directors have emptied the safe and the supporters are singing your name.",
+    "A season for the ages. The chairman weeps, hugs you twice and signs off a huge bonus.",
+  ],
+};

@@ -4,6 +4,12 @@ Versions follow `MAJOR.MINOR.PATCH`. The version lives in `package.json` and is 
 `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` (a test fails if they
 drift apart). It is shown in the app footer and on the new-game screen.
 
+## Unreleased
+
+- Season goal bonus: meeting the club goal at the end of the season pays a cash bonus (₦600k), and smashing it
+  pays more (₦1.5m), each with a line of board flavour text in the club news. Smashing it means finishing two
+  or more places inside the goal, or, for a title goal, winning the league by six points or more.
+
 ## 0.8.1
 
 - The overview now has a Season goal and rivalry card under the last result. It shows your club goal with the

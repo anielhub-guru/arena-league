@@ -6,8 +6,8 @@ import { buildSchedule, type Fixture } from "./schedule";
 import { heavyNotes, heaviestDefeat, mergeNotes, recordMeeting, rivalNotes, rivalOf, type Rivalry } from "./rivals";
 import { computeStandings, standingsAt } from "./standings";
 import { defaultLeagueRecords, recordMatch, recordRetirement, recordSeasonEnd, type Legend, type LeagueRecords } from "./history";
-import { MATCH_PAY, MAX_BUYS, MONEY_START, fmtMoney, playerValue, prizeFor, sellPrice, teenSalePrice, wageOf } from "./economy";
-import { RESERVE_COUNT, evolvePlayers, generateTeams, makeReserves, initialPotential, makeProspects, overall, teamRating } from "./teams";
+import { BONUS_FLAVOUR, MATCH_PAY, MAX_BUYS, MONEY_START, fmtMoney, goalBonus, goalResult, playerValue, prizeFor, sellPrice, teenSalePrice, wageOf } from "./economy";
+import { RESERVE_COUNT, evolvePlayers, generateTeams, makeReserves, initialPotential, makeProspects, objectiveTarget, overall, teamRating } from "./teams";
 
 export { describeLine, impact };
 
@@ -515,6 +515,9 @@ export function startNextSeason(prev: SeasonState): SeasonState {
   const ids = state.teams.map((t) => t.id);
   const table = standingsAt(ids, state.fixtures, state.totalMatchdays);
   const finish = table.findIndex((r) => r.teamId === state.managedId) + 1;
+  // The goal that applied to the season just played, worked out before this season joins the history.
+  const goal = objectiveTarget(state.managedId, lastFinishHere(state));
+  const clearOfSecond = table[0].teamId === state.managedId && table[1] ? table[0].points - table[1].points : 0;
   state.history.push(seasonRecordFor(state));
   for (const [id, now] of Object.entries(state.seasonStats)) {
     const career = (state.careerStats[id] ??= { ...emptyTotals(), seasons: 0 });
@@ -531,6 +534,13 @@ export function startNextSeason(prev: SeasonState): SeasonState {
   const wages = teamById(state, state.managedId).players.reduce((t, p) => t + wageOf(p), 0);
   state.money += prize - wages;
   news.push(`Season ${state.season} finances: ${ord(finish)} place prize money ${fmtMoney(prize)}, wage bill ${fmtMoney(-wages)}. Balance ${fmtMoney(state.money)}.`);
+  const result = goal.text ? goalResult(finish, goal.maxPos, clearOfSecond) : "missed";
+  if (result !== "missed") {
+    const bonus = goalBonus(result);
+    state.money += bonus;
+    const line = new Rng(hashSeed(state.seed, state.season, "bonus")).pick(BONUS_FLAVOUR[result]);
+    news.push(`${result === "smashed" ? "Goal smashed" : "Goal achieved"} (${goal.text.toLowerCase()}): bonus ${fmtMoney(bonus)}. ${line} Balance ${fmtMoney(state.money)}.`);
+  }
   state.season++;
   const retirees = evolvePlayers(state.teams, hashSeed(state.seed, state.season));
   news.push(`Season ${state.season} begins. Squads have aged and ratings have shifted.`);
