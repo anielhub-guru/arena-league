@@ -788,7 +788,11 @@ function squadView(s: SeasonState): HTMLElement {
     shapes.append(b);
   }
   return h("div", { class: "col" },
-    card(`${team.name} - starting five, bench & reserves`, h("div", { class: "toolbar" }, autoBtn), h("div", { class: "hint" }, hint), playerTable(team, { selectable: true })),
+    h("section", { class: "card squad-card" },
+      h("div", { class: "sq-head" }, h("h2", {}, `${team.name} - starting five, bench & reserves`), h("div", { class: "toolbar" }, autoBtn), h("div", { class: "hint" }, hint)),
+      h("div", { class: "avatar-slot", title: "Player avatar (placeholder)" }, h("img", { src: s.gender === "women" ? womenPortrait : menPortrait, alt: "Player avatar placeholder" })),
+      h("div", { class: "sq-table" }, playerTable(team, { selectable: true })),
+    ),
     ...(profileCard ? [profileCard] : []),
     shapeCard,
     card("Player stats", h("div", { class: "hint" }, "Hover a column heading to see what it counts. Yellow card: 10 minutes in the sin bin. Red card: off for the match and a one-match ban."), statsTable(s, team, render)),

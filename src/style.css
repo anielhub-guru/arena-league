@@ -416,3 +416,14 @@ h2.sub { margin-top: 14px; }
 
 .goal-status { margin: 6px 0 2px; font-weight: bold; }
 .goal-status.ok { color: var(--acc); } .goal-status.warn { color: #e0a43a; } .goal-status.bad { color: #ff6b5e; }
+
+/* Squad card: avatar space top right on small screens, a full-height right column on large ones. */
+.squad-card { display: grid; grid-template-columns: minmax(0, 1fr) 150px; grid-template-areas: "head avatar" "table table"; column-gap: 12px; }
+.squad-card .sq-head { grid-area: head; min-width: 0; }
+.squad-card .avatar-slot { grid-area: avatar; width: 150px; height: 150px; background: #11160f; border: 1px solid var(--line); border-radius: 12px; }
+.squad-card .sq-table { grid-area: table; min-width: 0; overflow-x: auto; }
+@media (min-width: 1500px) {
+  .squad-card { grid-template-columns: minmax(0, 1fr) 220px; grid-template-areas: "head avatar" "table avatar"; }
+  .squad-card .avatar-slot { width: 220px; height: 220px; }
+}
+.squad-card .avatar-slot img { width: 100%; height: 100%; object-fit: cover; border-radius: 11px; display: block; }
