@@ -4,6 +4,17 @@ Versions follow `MAJOR.MINOR.PATCH`. The version lives in `package.json` and is 
 `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` (a test fails if they
 drift apart). It is shown in the app footer and on the new-game screen.
 
+## 0.10.0
+
+- Illustrated cutaways in the women's league. Now and then a moment is shown as a detailed drawing over the
+  arena: a card, a try (an open dive, diving through an ankle tackle or breaking a waist tackle, or the
+  celebration), a big hit or waist-wrap or double-team tackle, a last-ditch cover tackle, and a jackal
+  turnover. The players drawn wear their own hairstyle. They are chosen at random, two or three a match (never
+  twice within seven match minutes), and a replay shows the same ones. A Cutaways control under the match view picks how they
+  cut in (forward diagonal, split slash or hard cut) or switches them off, with an optional impact shake;
+  the choice is remembered, and reduced-motion systems start with them off. They live in `src/cutaways`,
+  which can be updated on its own (see its README).
+
 ## 0.9.0
 
 - Player avatars. Every player in the women's league is created with a look: one of five hairstyles, one of two
@@ -13,14 +24,6 @@ drift apart). It is shown in the app footer and on the new-game screen.
   look the same way, and players from older saves are given a stable one. The men's league keeps its placeholder
   until its artwork exists. The look also stores eyes, nose, lips and jaw adjustments (all at the original for
   now) ready for a future customise option.
-- Illustrated cutaways in the women's league. Now and then a moment is shown as a detailed drawing over the
-  arena: a card, a try (an open dive, diving through an ankle tackle or breaking a waist tackle, or the
-  celebration), a big hit or waist-wrap or double-team tackle, a last-ditch cover tackle, and a jackal
-  turnover. The players drawn wear their own hairstyle. They are chosen at random, two or three a match (never
-  twice within seven match minutes), and a replay shows the same ones. A Cutaways control under the match view picks how they
-  cut in (forward diagonal, split slash or hard cut) or switches them off, with an optional impact shake;
-  the choice is remembered, and reduced-motion systems start with them off. They live in `src/cutaways`,
-  which can be updated on its own (see its README).
 - Rare long-range drop goal: about one in ten territory kicks that would have run dead is instead a monster kick
   that holds its line and splits the posts for three points. The arena shows the usual towering kick, then it
   goes over the bar instead of running dead.
