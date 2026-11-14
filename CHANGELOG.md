@@ -6,6 +6,13 @@ drift apart). It is shown in the app footer and on the new-game screen.
 
 ## Unreleased
 
+- Match experience. Playing matches now develops players, not just training. At the offseason a player's growth
+  toward potential is scaled by the share of the season's matches they played: for under-22s from 0.4x on the
+  bench to 1.2x as an ever-present, for 22 to 27 from 0.7x to 1.2x. Veterans from 31 who played at least half
+  the matches fade more slowly. Potential and star ratings are unchanged, so a benched prospect reaches their
+  ceiling later rather than never. Weekly training is still random, so players who are not picked can still
+  catch up. The Player progress table shows each player's appearances and a pace tag (Fast, Steady or
+  Stalling: needs games). AI clubs follow the same rules.
 - Added a fictional-content disclaimer to the league picker screen and the README.
 
 ## 0.10.0

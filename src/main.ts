@@ -33,7 +33,7 @@ import {
 } from "./league/season";
 import { RIVAL_MIN_MEETINGS, headToHead, heaviestDefeat, rivalOf } from "./league/rivals";
 import { computeStandings, teamForm } from "./league/standings";
-import { TEAM_DEFS, clubObjective, objectiveTarget, generateTeams, overall, potentialStars, teamColor, teamRating } from "./league/teams";
+import { TEAM_DEFS, clubObjective, objectiveTarget, generateTeams, overall, paceFactor, playShare, potentialStars, teamColor, teamRating } from "./league/teams";
 import * as store from "./storage";
 import { LiveMatch } from "./viewer/live";
 import { ATTR_NAMES, TACTIC_FOCUS, bestFive, buildRadar, playerProfile, profileOf } from "./viewer/radar";
@@ -830,25 +830,32 @@ function trainingView(s: SeasonState): HTMLElement {
   }
   const gains = s.trainGains ?? {};
   const t = h("table", { class: "squad stats" });
-  t.append(h("thead", {}, h("tr", {}, h("th", { class: "club" }, "Player"), h("th", {}, "Age"), h("th", { title: "Average of the six ratings" }, "Overall"), h("th", { title: "Potential: the ceiling training cannot lift a player past" }, "Pot"), h("th", { title: "Rating points gained from training this season" }, "Trained"), ...ATTRS.map((a) => h("th", { title: ATTR_INFO[a][1] }, ATTR_INFO[a][0])))));
+  t.append(h("thead", {}, h("tr", {}, h("th", { class: "club" }, "Player"), h("th", {}, "Age"), h("th", { title: "Average of the six ratings" }, "Overall"), h("th", { title: "Potential: the ceiling training cannot lift a player past" }, "Pot"), h("th", { title: "Matches played this season out of matches so far. Playing time speeds growth at the offseason" }, "Apps"), h("th", { title: "How fast this player is developing, from match experience" }, "Pace"), h("th", { title: "Rating points gained from training this season" }, "Trained"), ...ATTRS.map((a) => h("th", { title: ATTR_INFO[a][1] }, ATTR_INFO[a][0])))));
   const body = h("tbody");
   const total = (id: string) => Object.values(gains[id] ?? {}).reduce((n, v) => n + (v ?? 0), 0);
   for (const p of [...team.players].sort((a, b) => total(b.id) - total(a.id) || overall(b) - overall(a))) {
     const g = gains[p.id] ?? {};
     const n = total(p.id);
     const capped = overall(p) >= (p.potential ?? 99);
+    const apps = s.seasonStats[p.id]?.apps ?? 0;
+    const done = s.matchday - 1;
+    const pace = paceFactor(p.age, playShare(apps, done));
+    const growing = p.age <= 27 && !capped && done > 0;
+    const paceLabel = !growing ? "" : pace >= 1 ? "Fast" : pace >= 0.75 ? "Steady" : "Stalling: needs games";
     body.append(h("tr", {},
       h("td", { class: "club" }, p.name),
       h("td", {}, String(p.age)),
       h("td", {}, String(overall(p))),
       h("td", { title: capped ? "At potential: training can no longer improve this player" : "" }, stars(p.potential ?? 0) + (capped ? " max" : "")),
+      h("td", {}, done > 0 ? `${apps}/${done}` : "-"),
+      h("td", { class: pace < 0.75 && growing ? "mv down" : "" }, paceLabel),
       h("td", { class: n ? "mv up" : "mv same" }, n ? `+${n}` : "0"),
       ...ATTRS.map((a) => h("td", {}, String(p[a]), g[a] ? h("span", { class: "mv up" }, ` +${g[a]}`) : ""))));
   }
   t.append(body);
   return h("div", { class: "col" },
     card("Training focus", h("div", { class: "hint" }, "After each matchday three players get a chance to improve in this area."), focus),
-    card(`Player progress, season ${s.season}`, h("div", { class: "hint" }, "Gains from training since the season began, best first. Ratings also shift between seasons as players age. A player at their potential stops improving."), t),
+    card(`Player progress, season ${s.season}`, h("div", { class: "hint" }, "Gains from training since the season began, best first. Ratings also shift between seasons as players age, and young players grow faster the more matches they play. A player at their potential stops improving."), t),
   );
 }
 

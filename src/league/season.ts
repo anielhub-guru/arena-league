@@ -7,7 +7,7 @@ import { heavyNotes, heaviestDefeat, mergeNotes, recordMeeting, rivalNotes, riva
 import { computeStandings, standingsAt } from "./standings";
 import { defaultLeagueRecords, recordMatch, recordRetirement, recordSeasonEnd, type Legend, type LeagueRecords } from "./history";
 import { BONUS_FLAVOUR, MATCH_PAY, MAX_BUYS, MONEY_START, fmtMoney, goalBonus, goalResult, playerValue, prizeFor, sellPrice, teenSalePrice, wageOf } from "./economy";
-import { RESERVE_COUNT, evolvePlayers, generateTeams, makeReserves, initialPotential, makeProspects, objectiveTarget, overall, teamRating } from "./teams";
+import { RESERVE_COUNT, evolvePlayers, playShare, generateTeams, makeReserves, initialPotential, makeProspects, objectiveTarget, overall, teamRating } from "./teams";
 
 export { describeLine, impact };
 
@@ -524,6 +524,8 @@ export function startNextSeason(prev: SeasonState): SeasonState {
     for (const k of STAT_KEYS) career[k] += now[k];
     if (now.apps > 0) career.seasons++;
   }
+  const played = state.seasonStats;
+  const matches = state.totalMatchdays;
   state.seasonStats = {};
   state.trainGains = {};
   for (const t of state.teams) for (const p of t.players) delete p.tired;
@@ -542,7 +544,7 @@ export function startNextSeason(prev: SeasonState): SeasonState {
     news.push(`${result === "smashed" ? "Goal smashed" : "Goal achieved"} (${goal.text.toLowerCase()}): bonus ${fmtMoney(bonus)}. ${line} Balance ${fmtMoney(state.money)}.`);
   }
   state.season++;
-  const retirees = evolvePlayers(state.teams, hashSeed(state.seed, state.season));
+  const retirees = evolvePlayers(state.teams, hashSeed(state.seed, state.season), (id) => playShare(played[id]?.apps ?? 0, matches));
   news.push(`Season ${state.season} begins. Squads have aged and ratings have shifted.`);
   let n = 0;
   const season = state.season;

@@ -92,11 +92,27 @@ export function generateTeams(seed: number, gender: Gender = "men"): Team[] {
 /** Chance a player retires at the end of the season in which they reach this age. */
 export const retireChance = (age: number) => (age <= 30 ? 0 : age === 31 ? 0.1 : age === 32 ? 0.25 : age === 33 ? 0.45 : age === 34 ? 0.7 : 1);
 
+/** Share of the season's matches a player took the field in, from 0 to 1. */
+export const playShare = (apps: number, matches: number) => (matches > 0 ? Math.max(0, Math.min(1, apps / matches)) : 0);
+
 /**
- * Offseason: everyone ages. Youngsters grow toward their potential, veterans fade and lose potential.
+ * How much match experience scales growth toward potential, for a player of this age who took the field in this
+ * share of the season. Under 22 it matters most (0.4 on the bench, 1.2 as an ever-present). From 22 to 27 it
+ * is an even mix of training and playing (0.7 to 1.2). Older players are not growing, so it is 1.
+ */
+export function paceFactor(age: number, share: number): number {
+  if (age <= 21) return 0.4 + 0.8 * share;
+  if (age <= 27) return 0.7 + 0.5 * share;
+  return 1;
+}
+
+/**
+ * Offseason: everyone ages. Youngsters grow toward their potential (faster the more they played, see `paceFactor`),
+ * veterans fade and lose potential, and veterans who kept playing fade more slowly.
+ * `shareOf` gives each player's share of last season's matches. Potential itself is never changed by playing time.
  * Returns the players who retire, by club id. They are not removed here.
  */
-export function evolvePlayers(teams: Team[], seed: number): Map<string, Player[]> {
+export function evolvePlayers(teams: Team[], seed: number, shareOf: (id: string) => number): Map<string, Player[]> {
   const retired = new Map<string, Player[]>();
   for (const t of teams) {
     const rng = new Rng(hashSeed(seed, t.id, "evolve"));
@@ -105,11 +121,13 @@ export function evolvePlayers(teams: Team[], seed: number): Map<string, Player[]
       p.potential ??= initialPotential(p, rng);
       if (p.age <= 27) {
         const gap = p.potential - overall(p);
-        const gain = gap > 0 ? Math.max(0, Math.min(6, Math.round(gap / (p.age <= 22 ? 2.2 : 3.5) + rng.int(-1, 1)))) : 0;
+        const pace = paceFactor(p.age, shareOf(p.id));
+        const gain = gap > 0 ? Math.max(0, Math.min(6, Math.round((gap / (p.age <= 22 ? 2.2 : 3.5)) * pace + rng.int(-1, 1)))) : 0;
         for (const a of ATTRS) p[a] = clampRating(p[a] + gain + rng.int(-1, 1));
       } else if (p.age >= 31) {
         p.potential = Math.max(30, p.potential - 2);
-        for (const a of ATTRS) p[a] = clampRating(p[a] - 2 + (a === "pace" ? -1 : 0) + rng.int(-2, 2));
+        const fade = shareOf(p.id) >= 0.5 ? 1 : 2; // a veteran who keeps playing stays sharper
+        for (const a of ATTRS) p[a] = clampRating(p[a] - fade + (a === "pace" ? -1 : 0) + rng.int(-2, 2));
       } else {
         for (const a of ATTRS) p[a] = clampRating(p[a] + rng.int(-1, 1));
       }
