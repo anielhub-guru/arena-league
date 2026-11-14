@@ -715,9 +715,9 @@ function squadView(s: SeasonState): HTMLElement {
   const fit = attackFit(starters);
   const skill = Math.round(starters.reduce((t, p) => t + (p.pace + p.handling) / 2, 0) / starters.length);
   const fitText = fit >= 0.6 ? "well suited" : fit >= 0.1 ? "a reasonable fit" : fit >= -0.3 ? "a poor fit" : "badly suited";
-  const tactics = h("div", { class: "choices" });
+  const tactics = h("div", { class: "toolbar" });
   for (const [id, t] of Object.entries(TACTICS)) {
-    const b = h("button", { class: `choice ${s.tactic === id ? "active" : ""}` }, h("b", {}, t.label), h("span", {}, t.description));
+    const b = h("button", { class: s.tactic === id ? "active" : "", title: t.description }, t.label);
     b.onclick = () => void update((x) => void (x.tactic = id as TacticId));
     tactics.append(b);
   }
@@ -742,9 +742,18 @@ function squadView(s: SeasonState): HTMLElement {
     };
     return b;
   }));
+  const leagueMean = mean(profileOf(leagueFive));
+  const tacticAdvice = s.tactic === "attacking"
+    ? `Attacking needs pace and handling. Your starting five averages ${skill} (62 is neutral, 72 is ideal), so ${fitText}. A poorly suited side that attacks makes errors and gets countered when it loses the ball.`
+    : focus.length
+      ? `${TACTICS[s.tactic].label} leans on ${names}. Your starting five averages ${mean(mine)} there, against ${leagueMean} for the league. ${mean(mine) >= leagueMean + 3 ? "A good fit." : mean(mine) >= leagueMean - 3 ? "An average fit." : "A weak fit for this tactic."}`
+      : "Balanced makes no special demand on your starting five, so any shape works. Pick another tactic to see how well your side suits it.";
   const shapeCard = card(
     "Team shape",
-    h("div", { class: "hint" }, "Average of each rating across your starting five as they will play (out-of-position penalty included). The scale is fixed at 40 to 90, so you can compare shapes at a glance."),
+    h("div", { class: "hint" }, "Average of each rating across your starting five as they will play (out-of-position penalty included). The scale is fixed at 40 to 90, so you can compare shapes at a glance. Hover a tactic for what it does."),
+    h("div", { class: "hint" }, "Tactic"),
+    tactics,
+    h("div", { class: "advice" }, tacticAdvice),
     vsButtons,
     buildRadar(
       [
@@ -790,7 +799,6 @@ function squadView(s: SeasonState): HTMLElement {
       ...(advice ? [h("div", { class: "advice" }, `Next opponent ${opp!.name}: ${advice.why}`)] : []),
       shapes,
     ),
-    card("Your tactic", h("div", { class: "advice" }, `Attacking needs pace and handling. Your starting five averages ${skill} (62 is neutral, 72 is ideal), so ${fitText}. A poorly suited side that attacks makes errors and gets countered when it loses the ball.`), tactics),
   );
 }
 
