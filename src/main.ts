@@ -68,7 +68,8 @@ let error = "";
 const app = document.getElementById("app") as HTMLElement;
 const scoutDialog = h("dialog", { class: "scout" });
 const rulesDialog = h("dialog", { class: "rules" });
-document.body.append(scoutDialog, rulesDialog);
+const creditsDialog = h("dialog", { class: "credits" });
+document.body.append(scoutDialog, rulesDialog, creditsDialog);
 
 const ATTR_INFO: Record<(typeof ATTRS)[number], [string, string]> = {
   power: ["Power", "Strength. Breaks tackles and drives through defenders. Matters most for Anchors and Bruisers."],
@@ -82,6 +83,19 @@ const ATTR_INFO: Record<(typeof ATTRS)[number], [string, string]> = {
 function showRules() {
   rulesDialog.replaceChildren(buildRules(() => rulesDialog.close()));
   rulesDialog.showModal();
+}
+
+function showCredits() {
+  const close = h("button", { class: "primary" }, "Close");
+  close.onclick = () => creditsDialog.close();
+  creditsDialog.replaceChildren(
+    h("h2", {}, "Credits"),
+    h("p", { class: "dim" }, "Dominion League Manager"),
+    h("p", {}, "Created by ", h("b", {}, "Oluwaseun Daniel")),
+    h("p", { class: "dim" }, `Version ${__APP_VERSION__}. Free software under the GNU GPL v3.`),
+    close,
+  );
+  creditsDialog.showModal();
 }
 
 // ------------------------------------------------------------------ actions
@@ -897,6 +911,8 @@ function pickerView(): HTMLElement {
   const box = h("div", { class: "picker" }, h("h1", {}, "DOMINION LEAGUE MANAGER"), h("p", { class: "dim" }, `Dominion: five-a-side rugby for territory, played across Nigeria.  Version ${__APP_VERSION__}`));
   const help = h("button", { class: "icon", title: "How to play" }, "?");
   help.onclick = showRules;
+  const credits = h("button", { class: "ghost" }, "Credits");
+  credits.onclick = showCredits;
 
   if (!pickGender) {
     box.classList.add("wide");
@@ -917,7 +933,7 @@ function pickerView(): HTMLElement {
       grid.append(b);
     }
     box.append(grid);
-    box.append(h("p", { class: "dim" }, "The clubs are fixed. The players are generated fresh every time you start a new game, so each game has different squads and stars."), h("p", { class: "disclaimer" }, DISCLAIMER), help);
+    box.append(h("p", { class: "dim" }, "The clubs are fixed. The players are generated fresh every time you start a new game, so each game has different squads and stars."), h("p", { class: "disclaimer" }, DISCLAIMER), h("div", { class: "toolbar" }, help, credits));
     if (saves.length) {
       const list = h("div", { class: "saves" }, h("p", { class: "select-tag" }, "SAVED GAMES"));
       for (const sv of saves) {
@@ -945,7 +961,7 @@ function pickerView(): HTMLElement {
     b.onclick = () => void startNew(def.id);
     box.append(b);
   }
-  box.append(h("p", { class: "dim" }, "Ratings are indicative: the club's strength is fixed, but its players are generated when you start."), h("div", { class: "toolbar" }, back, help));
+  box.append(h("p", { class: "dim" }, "Ratings are indicative: the club's strength is fixed, but its players are generated when you start."), h("div", { class: "toolbar" }, back, help, credits));
   return box;
 }
 
@@ -1027,7 +1043,7 @@ document.addEventListener("keydown", (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const target = e.target as HTMLElement;
   if (["SELECT", "INPUT", "BUTTON"].includes(target.tagName)) return;
-  if (scoutDialog.open || rulesDialog.open) return;
+  if (scoutDialog.open || rulesDialog.open || creditsDialog.open) return;
   if (live) {
     if (e.key === " ") {
       e.preventDefault();
